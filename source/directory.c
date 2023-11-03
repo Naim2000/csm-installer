@@ -1,3 +1,5 @@
+#include "directory.h"
+
 #include <gccore.h>
 #include <wiiuse/wpad.h>
 #include <fat.h>
@@ -10,45 +12,16 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include "fatMounter.h"
-
-[[gnu::weak]] void OSReport([[maybe_unused]] const char* fmt, ...);
+static u32 buttons = 0;
 
 struct entry {
 	u8 flags;
 	char name[NAME_MAX];
 };
-#define MAX_ENTRIES 25
-
-static void *xfb = NULL;
-static GXRModeObj *rmode = NULL;
-static u32 buttons = 0;
-
-static inline const char* fileext(const char* name) {
-	if ((name = strrchr(name, '.'))) name += 1;
-	return name;
-}
 
 static char* pwd() {
 	static char cwd[PATH_MAX];
 	return getcwd(cwd, sizeof(cwd));
-}
-
-static inline bool strequal(const char* a, const char* b) {
-	return (strcmp(a, b) == 0) && (strlen(a) == strlen(b));
-}
-
-[[gnu::constructor]] void init_video(int row, int col) {
-	VIDEO_Init();
-	rmode = VIDEO_GetPreferredMode(NULL);
-	xfb = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
-	console_init(xfb,20,20,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*VI_DISPLAY_PIX_SZ);
-	VIDEO_Configure(rmode);
-	VIDEO_SetNextFramebuffer(xfb);
-	VIDEO_SetBlack(FALSE);
-	VIDEO_Flush();
-	VIDEO_WaitVSync();
-	if(rmode->viTVMode&VI_NON_INTERLACE) VIDEO_WaitVSync();
 }
 
 static inline void cursorpos(int row, int col) {
@@ -57,6 +30,7 @@ static inline void cursorpos(int row, int col) {
 
 static inline void clear() {
 	printf("\x1b[2J");
+	fflush(stdout);
 }
 
 static inline void scanpads() {
@@ -64,16 +38,16 @@ static inline void scanpads() {
 	buttons = WPAD_ButtonsDown(0);
 }
 
-static inline void PrintEntries(struct entry entries[], size_t count, size_t selected) {
-	size_t cnt = (count > MAX_ENTRIES) ? MAX_ENTRIES : count;
+static inline void PrintEntries(struct entry entries[], size_t count, size_t max, size_t selected) {
+	size_t cnt = (count > max) ? max : count;
 	for (size_t j = 0; j < cnt; j++) {
-		if ((selected > (MAX_ENTRIES - 2)) && (j < (selected - (MAX_ENTRIES - 2)))) {cnt++; continue;};
+		if ((selected > (max - 2)) && (j < (selected - (max - 2)))) { cnt++; continue; };
 		if (j == selected) printf(">>");
 		printf("\t%s\n", entries[j].name);
 	}
 }
 
-size_t GetDirectoryEntryCount(DIR* p_dir) {
+static size_t GetDirectoryEntryCount(DIR* p_dir) {
 	size_t count = 0;
 	DIR* pdir;
 	struct dirent* pent;
@@ -116,7 +90,7 @@ static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count) {
 	return i;
 }
 
-struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, size_t* count) {
+static struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, size_t* count) {
 	if (!entries) return NULL;
 	DIR* pdir;
 	size_t cnt = 0;
@@ -146,12 +120,14 @@ struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, size_t* co
 	return *entries;
 }
 
-static char* SelectFileMenu() {
+char* SelectFileMenu(const char* header) {
 	struct entry* entries = NULL;
 	int index = 0;
-	size_t cnt = 0;
+	size_t cnt = 0, max = MAX_ENTRIES;
 	static char filename[PATH_MAX];
 	char prev_cwd[PATH_MAX];
+
+	if (header) max -= 2;
 
 	if (!getcwd(prev_cwd, sizeof(prev_cwd)))
 		perror("Failed to get current working directory?");
@@ -165,8 +141,9 @@ static char* SelectFileMenu() {
 		}
 		clear();
 		cursorpos(2, 0);
+		if (header) printf("%s\n\n", header);
 		printf("Current directory: %s\n\n", pwd());
-		PrintEntries(entries, cnt, index);
+		PrintEntries(entries, cnt, max, index);
 
 		struct entry* entry = entries + index;
 		for(;;) {
@@ -190,7 +167,7 @@ static char* SelectFileMenu() {
 				}
 				else {
 					if (filename[sprintf(filename, "%s", pwd()) - 1] != '/') strcat(filename, "/");
-					sprintf(filename + strlen(filename), "%s", entry->name);
+					strcat(filename, entry->name);
 					chdir(prev_cwd);
 					return filename;
 				}
@@ -210,19 +187,4 @@ static char* SelectFileMenu() {
 	}
 }
 
-int main(int argc, char* argv[]) {
-	init_video(2, 0);
-	WPAD_Init();
-	if (mountSD() && mountUSB()) {
-		printf("Unable to mount a storage device...\n");
-		goto error;
-	}
 
-	char* file = strdup(SelectFileMenu());
-	printf("%s\n", file);
-	if (strequal(fileext(file), "txt")) puts("this is a text file, should read it");
-
-error:
-	while(!SYS_ResetButtonDown());
-	return 0;
-}
