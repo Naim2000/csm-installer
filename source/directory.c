@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 static u32 buttons = 0;
+static struct stat statbuf;
 
 struct entry {
 	u8 flags;
@@ -38,16 +39,26 @@ static inline void scanpads() {
 	buttons = WPAD_ButtonsDown(0);
 }
 
+static inline bool isDirectory(const char* path) {
+	stat(path, &statbuf);
+	return (S_ISDIR(statbuf.st_mode) > 0);
+}
+
 static inline void PrintEntries(struct entry entries[], size_t count, size_t max, size_t selected) {
+	if (!count) {
+		printf("\t\x1b[90m [nothing.] \x1b[39m");
+		return;
+	}
 	size_t cnt = (count > max) ? max : count;
-	for (size_t j = 0; j < cnt; j++) {
-		if ((selected > (max - 2)) && (j < (selected - (max - 2)))) { cnt++; continue; };
+	for (size_t j = 0; j < cnt;) {
+		if ((selected > (max - 2)) && (j < (selected - (max - 2)))) continue;
 		if (j == selected) printf(">>");
 		printf("\t%s\n", entries[j].name);
+		j++;
 	}
 }
 
-static size_t GetDirectoryEntryCount(DIR* p_dir) {
+static size_t GetDirectoryEntryCount(DIR* p_dir, FileFilter filter) {
 	size_t count = 0;
 	DIR* pdir;
 	struct dirent* pent;
@@ -57,18 +68,21 @@ static size_t GetDirectoryEntryCount(DIR* p_dir) {
 		(pdir = opendir("."))
 	)) return 0;
 
-	while ((pent = readdir(pdir)) != NULL )
-		if (!(strequal(pent->d_name, ".") || strequal(pent->d_name, ".."))) count++;
+	while ((pent = readdir(pdir)) != NULL ) {
+		if (
+			(!(strequal(pent->d_name, ".") || strequal(pent->d_name, ".."))) &&
+			(!filter || filter(pent->d_name, isDirectory(pent->d_name)))
+		) count++;
+	}
 
 	if(p_dir) rewinddir(pdir);
 	else closedir(pdir);
 	return count;
 }
 
-static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count) {
+static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count, FileFilter filter) {
 	DIR* pdir;
 	struct dirent *pent;
-	struct stat statbuf;
 	size_t i = 0;
 
 	if (!(
@@ -79,10 +93,12 @@ static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count) {
 	while (i < count) {
 		pent = readdir(pdir);
 		if (!pent) break;
-		if(strequal(pent->d_name, ".") || strequal(pent->d_name, "..")) continue;
+		if(strequal(pent->d_name, ".") || strequal(pent->d_name, "..") ||
+			(filter && !filter(pent->d_name, isDirectory(pent->d_name)))) continue;
 
-		stat(pent->d_name, &statbuf);
-		entries[i].flags = 0x80 | (S_ISDIR(statbuf.st_mode) > 0);
+		entries[i].flags =
+			(isDirectory(pent->d_name) << 0);
+
 		strcpy(entries[i].name, pent->d_name);
 		i++;
 	}
@@ -90,8 +106,8 @@ static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count) {
 	return i;
 }
 
-static struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, size_t* count) {
-	if (!entries) return NULL;
+static struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, size_t* count, FileFilter filter) {
+	if (!entries || !count) return NULL;
 	DIR* pdir;
 	size_t cnt = 0;
 
@@ -100,8 +116,12 @@ static struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, siz
 		(pdir = opendir("."))
 	)) return NULL;
 
-	cnt = GetDirectoryEntryCount(pdir);
-	if (!cnt) return NULL;
+	cnt = GetDirectoryEntryCount(pdir, filter);
+	if (!cnt) {
+		*count = 0;
+		if (*entries) **entries = (struct entry){ 0x01, ".." };
+		return NULL;
+	}
 
 	// If ptr is NULL, then the call is equivalent to malloc(size), for all values of size.
 	struct entry* _entries = reallocarray(*entries, cnt, sizeof(struct entry));
@@ -113,14 +133,14 @@ static struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, siz
 	memset(_entries, 0, sizeof(struct entry) * cnt);
 	*entries = _entries;
 
-	*count = ReadDirectory(pdir, *entries, cnt);
+	*count = ReadDirectory(pdir, *entries, cnt, filter);
 
 	if(p_dir) rewinddir(pdir);
 	else closedir(pdir);
 	return *entries;
 }
 
-char* SelectFileMenu(const char* header) {
+char* SelectFileMenu(const char* header, FileFilter filter) {
 	struct entry* entries = NULL;
 	int index = 0;
 	size_t cnt = 0, max = MAX_ENTRIES;
@@ -132,7 +152,7 @@ char* SelectFileMenu(const char* header) {
 	if (!getcwd(prev_cwd, sizeof(prev_cwd)))
 		perror("Failed to get current working directory?");
 
-	GetDirectoryEntries(&entries, NULL, &cnt);
+	GetDirectoryEntries(&entries, NULL, &cnt, filter);
 
 	for(;;) {
 		if (!entries) {
@@ -161,7 +181,7 @@ char* SelectFileMenu(const char* header) {
 			else if (buttons & WPAD_BUTTON_A) {
 				if (entry->flags & 0x01) {
 					chdir(entry->name);
-					GetDirectoryEntries(&entries, NULL, &cnt);
+					GetDirectoryEntries(&entries, NULL, &cnt, filter);
 					index = 0;
 					break;
 				}
@@ -178,7 +198,7 @@ char* SelectFileMenu(const char* header) {
 					else perror("Failed to go to parent dir");
 				}
 				else {
-					GetDirectoryEntries(&entries, NULL, &cnt);
+					GetDirectoryEntries(&entries, NULL, &cnt, filter);
 					index = 0;
 					break;
 				}

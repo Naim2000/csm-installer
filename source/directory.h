@@ -1,9 +1,12 @@
 #include <string.h>
 #include <stdbool.h>
+#include <gctypes.h>
 
 #define MAX_ENTRIES 25
 
-char* SelectFileMenu(const char* header);
+typedef bool (*FileFilter)(const char* name, u8 flags);
+
+char* SelectFileMenu(const char* header, FileFilter filter);
 
 static inline const char* fileext(const char* name) {
 	if ((name = strrchr(name, '.'))) name += 1;

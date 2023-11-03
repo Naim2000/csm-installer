@@ -24,6 +24,10 @@ static GXRModeObj *rmode = NULL;
 	if(rmode->viTVMode & VI_NON_INTERLACE) VIDEO_WaitVSync();
 }
 
+bool isExecutable(const char* name, u8 flags) {
+	return (flags & 0x01) || (fileext(name) && (strequal(fileext(name), "dol") || strequal(fileext(name), "elf")));
+}
+
 int main(int argc, char* argv[]) {
 	WPAD_Init();
 	if (!mountSD() && !mountUSB()) {
@@ -31,7 +35,7 @@ int main(int argc, char* argv[]) {
 		goto error;
 	}
 
-	char* file = SelectFileMenu("Directory.");
+	char* file = SelectFileMenu("Directory.", &isExecutable);
 	printf("%s\n", file);
 	if (strequal(fileext(file), "txt")) puts("this is a text file, should read it");
 
