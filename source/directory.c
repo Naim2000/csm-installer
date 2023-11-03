@@ -10,25 +10,27 @@
 #include <errno.h>
 #include <unistd.h>
 
-extern __attribute__((weak)) void OSReport([[maybe_unused]] const char* fmt, ...)
-	__attribute((format (printf, 1, 2) ));
+
+extern __attribute__((weak)) void OSReport([[maybe_unused]] const char* fmt, ...);
 
 struct entry {
 	u8 flags;
 	char name[NAME_MAX];
 };
-#define MAX_ENTRIES 20
+#define MAX_ENTRIES 25
 
 static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
 static u32 buttons = 0;
 
-__attribute__((pure)) static inline const char* fileext(const char* name) {
+static inline const char* fileext(const char* name) {
 	if ((name = strrchr(name, '.'))) name += 1;
 	return name;
 }
 
-
+static inline bool strequal(const char* a, const char* b) {
+	return (strcmp(a, b) == 0) && (strlen(a) == strlen(b));
+}
 
 static inline void init_video(int row, int col) {
 	VIDEO_Init();
@@ -50,40 +52,88 @@ static inline void scanpads() {
 	buttons = WPAD_ButtonsDown(0);
 }
 
-static inline void PrintEntries(struct entry entries[], int count, int selected) {
-	for (int j = 0; j < count; j++) {
+size_t GetDirectoryEntryCount(DIR* p_dir) {
+	size_t count = 0;
+	DIR* pdir;
+	struct dirent* pent;
+
+	if (!(pdir = p_dir)) pdir = opendir(".");
+	if (!pdir) return 0;
+
+	while ((pent = readdir(pdir)) != NULL )
+		if (!(strequal(pent->d_name, ".") || strequal(pent->d_name, ".."))) count++;
+
+//	OSReport("%s: entry count: %u", __FUNCTION__, count);
+	if(p_dir) rewinddir(pdir);
+	else closedir(pdir);
+	return count;
+}
+
+static inline void PrintEntries(struct entry entries[], size_t count, size_t selected) {
+	size_t cnt = (count > MAX_ENTRIES) ? MAX_ENTRIES : count;
+	for (size_t j = 0; j < cnt; j++) {
+		if ((selected > (MAX_ENTRIES - 2)) && (j < (selected - (MAX_ENTRIES - 2)))) {cnt++; continue;};
 		if (j == selected) printf(">>");
 		printf("\t%s\n", entries[j].name);
 	}
 }
 
-static int ReadCurrentDirectory(struct entry entries[]) {
-	DIR *pdir;
+static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count) {
+	DIR* pdir;
 	struct dirent *pent;
 	struct stat statbuf;
-	int i = 0;
+	size_t i = 0;
 
-	pdir = opendir(".");
-	if (!pdir)
-		return -errno;
+	if (!(pdir = p_dir)) pdir = opendir(".");
+	if (!pdir) return 0;
 
-	while (i < MAX_ENTRIES) {
+	while (i < count) {
 		pent = readdir(pdir);
 		if (!pent) break;
-		if(pent->d_name[0] == '.' && strlen(pent->d_name) == 1) continue;
+		if(strequal(pent->d_name, ".") || strequal(pent->d_name, "..")) continue;
 
 		stat(pent->d_name, &statbuf);
 		entries[i].flags = 0x80 | (S_ISDIR(statbuf.st_mode) > 0);
 		strcpy(entries[i].name, pent->d_name);
 		i++;
 	}
-	closedir(pdir);
+	if (!p_dir) closedir(pdir);
 	return i;
 }
 
+struct entry* GetDirectoryEntries(DIR* p_dir, size_t* count) {
+	DIR* pdir;
+	struct entry* entries = NULL;
+	size_t cnt = 0;
+
+	if (!(pdir = p_dir)) pdir = opendir(".");
+	if (!pdir) goto error;
+
+	cnt = GetDirectoryEntryCount(pdir);
+	if (!cnt) goto error;
+
+	entries = calloc(sizeof(struct entry), cnt);
+	if (!entries) {
+		errno = ENOMEM;
+		goto error;
+	}
+
+	*count = ReadDirectory(pdir, entries, cnt);
+	if (*count == cnt) goto finish;
+
+error:
+	free(entries);
+	entries = NULL;
+finish:
+	if(p_dir) rewinddir(pdir);
+	else closedir(pdir);
+	return entries;
+}
+
 static char* SelectFileMenu() {
-	struct entry entries[MAX_ENTRIES] = {};
+	struct entry* entries;
 	int index = 0;
+	size_t cnt = 0;
 
 	static char filename[PATH_MAX];
 	char cwd[PATH_MAX], prev_cwd[PATH_MAX];
@@ -93,33 +143,34 @@ static char* SelectFileMenu() {
 		return NULL;
 	}
 
-	int i = ReadCurrentDirectory(entries);
-	if (i < 0) {
-		perror("ReadCurrentDirectory failed");
+	entries = GetDirectoryEntries(NULL, &cnt);
+	if (!entries) {
+		perror("GetDirectoryEntries failed");
 		return NULL;
 	}
 
 	for(;;) {
 		printf("\x1b[2J");
-		PrintEntries(entries, i, index);
+		PrintEntries(entries, cnt, index);
 
 		struct entry* entry = entries + index;
 		for(;;) {
 			scanpads();
 			if (buttons & WPAD_BUTTON_DOWN) {
-				if (index < (i - 1)) index += 1;
+				if (index < (cnt - 1)) index += 1;
 				else index = 0;
 				break;
 			}
 			else if (buttons & WPAD_BUTTON_UP) {
 				if (index > 0) index -= 1;
-				else index = i - 1;
+				else index = cnt - 1;
 				break;
 			}
 			else if (buttons & WPAD_BUTTON_A) {
 				if (entry->flags & 0x01) {
 					chdir(entry->name);
-					i = ReadCurrentDirectory(entries);
+					free(entries);
+					entries = GetDirectoryEntries(NULL, &cnt);
 					index = 0;
 					break;
 				}
@@ -128,17 +179,24 @@ static char* SelectFileMenu() {
 						perror("Failed to get current working directory");
 						return NULL;
 					}
-					printf("cwd: %s, name: %s\n", cwd, entry->name);
+				//	printf("cwd: %s, name: %s\n", cwd, entry->name);
 					if (filename[sprintf(filename, "%s", cwd) - 1] != '/') sprintf(filename + strlen(filename), "/");
 					sprintf(filename + strlen(filename), "%s", entry->name);
-					printf("filename: %s\n", filename);
+				//	printf("Returning to previous cwd %s\n", prev_cwd);
+					chdir(prev_cwd);
+				//	printf("filename: %s\n", filename);
 					return filename;
 				}
 			}
 			else if (buttons & WPAD_BUTTON_B) {
-				if (chdir("..") < 0) perror("Failed to go to parent dir");
+				if (chdir("..") < 0) {
+					if (errno == ENOENT) return NULL;
+					else perror("Failed to go to parent dir");
+				}
 				else {
-					i = ReadCurrentDirectory(entries);
+					free(entries);
+					entries = GetDirectoryEntries(NULL, &cnt);
+					index = 0;
 					break;
 				}
 			}
@@ -154,7 +212,7 @@ int main(int argc, char* argv[]) {
 		goto error;
 	}
 
-	SelectFileMenu();
+	printf("%s", SelectFileMenu());
 
 error:
 	while(!SYS_ResetButtonDown());
