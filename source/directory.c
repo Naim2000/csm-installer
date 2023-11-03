@@ -38,7 +38,7 @@ static inline bool strequal(const char* a, const char* b) {
 	return (strcmp(a, b) == 0) && (strlen(a) == strlen(b));
 }
 
-static inline void init_video(int row, int col) {
+[[gnu::constructor]] void init_video(int row, int col) {
 	VIDEO_Init();
 	rmode = VIDEO_GetPreferredMode(NULL);
 	xfb = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
@@ -49,8 +49,14 @@ static inline void init_video(int row, int col) {
 	VIDEO_Flush();
 	VIDEO_WaitVSync();
 	if(rmode->viTVMode&VI_NON_INTERLACE) VIDEO_WaitVSync();
+}
 
+static inline void cursorpos(int row, int col) {
 	printf("\x1b[%d;%dH", row, col);
+}
+
+static inline void clear() {
+	printf("\x1b[2J");
 }
 
 static inline void scanpads() {
@@ -157,7 +163,9 @@ static char* SelectFileMenu() {
 			perror("GetDirectoryEntries failed");
 			return NULL;
 		}
-		printf("\x1b[2JCurrent directory: %s\n\n", pwd());
+		clear();
+		cursorpos(2, 0);
+		printf("Current directory: %s\n\n", pwd());
 		PrintEntries(entries, cnt, index);
 
 		struct entry* entry = entries + index;
