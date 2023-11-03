@@ -10,8 +10,9 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include "fatMounter.h"
 
-extern __attribute__((weak)) void OSReport([[maybe_unused]] const char* fmt, ...);
+[[gnu::weak]] void OSReport([[maybe_unused]] const char* fmt, ...);
 
 struct entry {
 	u8 flags;
@@ -57,6 +58,15 @@ static inline void scanpads() {
 	buttons = WPAD_ButtonsDown(0);
 }
 
+static inline void PrintEntries(struct entry entries[], size_t count, size_t selected) {
+	size_t cnt = (count > MAX_ENTRIES) ? MAX_ENTRIES : count;
+	for (size_t j = 0; j < cnt; j++) {
+		if ((selected > (MAX_ENTRIES - 2)) && (j < (selected - (MAX_ENTRIES - 2)))) {cnt++; continue;};
+		if (j == selected) printf(">>");
+		printf("\t%s\n", entries[j].name);
+	}
+}
+
 size_t GetDirectoryEntryCount(DIR* p_dir) {
 	size_t count = 0;
 	DIR* pdir;
@@ -73,15 +83,6 @@ size_t GetDirectoryEntryCount(DIR* p_dir) {
 	if(p_dir) rewinddir(pdir);
 	else closedir(pdir);
 	return count;
-}
-
-static inline void PrintEntries(struct entry entries[], size_t count, size_t selected) {
-	size_t cnt = (count > MAX_ENTRIES) ? MAX_ENTRIES : count;
-	for (size_t j = 0; j < cnt; j++) {
-		if ((selected > (MAX_ENTRIES - 2)) && (j < (selected - (MAX_ENTRIES - 2)))) {cnt++; continue;};
-		if (j == selected) printf(">>");
-		printf("\t%s\n", entries[j].name);
-	}
 }
 
 static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count) {
@@ -204,12 +205,14 @@ static char* SelectFileMenu() {
 int main(int argc, char* argv[]) {
 	init_video(2, 0);
 	WPAD_Init();
-	if (!fatInitDefault()) {
-		printf("fatInitDefault failure: terminating\n");
+	if (mountSD() && mountUSB()) {
+		printf("Unable to mount a storage device...\n");
 		goto error;
 	}
 
-	printf("%s", SelectFileMenu());
+	char* file = strdup(SelectFileMenu());
+	printf("%s\n", file);
+	if (strequal(fileext(file), "txt")) puts("this is a text file, should read it");
 
 error:
 	while(!SYS_ResetButtonDown());
