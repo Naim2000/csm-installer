@@ -28,6 +28,11 @@ static inline const char* fileext(const char* name) {
 	return name;
 }
 
+static char* pwd() {
+	static char cwd[PATH_MAX];
+	return getcwd(cwd, sizeof(cwd));
+}
+
 static inline bool strequal(const char* a, const char* b) {
 	return (strcmp(a, b) == 0) && (strlen(a) == strlen(b));
 }
@@ -57,13 +62,14 @@ size_t GetDirectoryEntryCount(DIR* p_dir) {
 	DIR* pdir;
 	struct dirent* pent;
 
-	if (!(pdir = p_dir)) pdir = opendir(".");
-	if (!pdir) return 0;
+	if (!(
+		(pdir = p_dir) ||
+		(pdir = opendir("."))
+	)) return 0;
 
 	while ((pent = readdir(pdir)) != NULL )
 		if (!(strequal(pent->d_name, ".") || strequal(pent->d_name, ".."))) count++;
 
-//	OSReport("%s: entry count: %u", __FUNCTION__, count);
 	if(p_dir) rewinddir(pdir);
 	else closedir(pdir);
 	return count;
@@ -84,8 +90,10 @@ static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count) {
 	struct stat statbuf;
 	size_t i = 0;
 
-	if (!(pdir = p_dir)) pdir = opendir(".");
-	if (!pdir) return 0;
+	if (!(
+		(pdir = p_dir) ||
+		(pdir = opendir("."))
+	)) return 0;
 
 	while (i < count) {
 		pent = readdir(pdir);
@@ -101,56 +109,54 @@ static size_t ReadDirectory(DIR* p_dir, struct entry entries[], size_t count) {
 	return i;
 }
 
-struct entry* GetDirectoryEntries(DIR* p_dir, size_t* count) {
+struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, size_t* count) {
+	if (!entries) return NULL;
 	DIR* pdir;
-	struct entry* entries = NULL;
 	size_t cnt = 0;
 
-	if (!(pdir = p_dir)) pdir = opendir(".");
-	if (!pdir) goto error;
+	if (!(
+		(pdir = p_dir) ||
+		(pdir = opendir("."))
+	)) return NULL;
 
 	cnt = GetDirectoryEntryCount(pdir);
-	if (!cnt) goto error;
+	if (!cnt) return NULL;
 
-	entries = calloc(sizeof(struct entry), cnt);
-	if (!entries) {
+	// If ptr is NULL, then the call is equivalent to malloc(size), for all values of size.
+	struct entry* _entries = reallocarray(*entries, cnt, sizeof(struct entry));
+	if (!_entries) {
+		free(*entries);
 		errno = ENOMEM;
-		goto error;
+		return NULL;
 	}
+	memset(_entries, 0, sizeof(struct entry) * cnt);
+	*entries = _entries;
 
-	*count = ReadDirectory(pdir, entries, cnt);
-	if (*count == cnt) goto finish;
+	*count = ReadDirectory(pdir, *entries, cnt);
 
-error:
-	free(entries);
-	entries = NULL;
-finish:
 	if(p_dir) rewinddir(pdir);
 	else closedir(pdir);
-	return entries;
+	return *entries;
 }
 
 static char* SelectFileMenu() {
-	struct entry* entries;
+	struct entry* entries = NULL;
 	int index = 0;
 	size_t cnt = 0;
-
 	static char filename[PATH_MAX];
-	char cwd[PATH_MAX], prev_cwd[PATH_MAX];
+	char prev_cwd[PATH_MAX];
 
-	if (!getcwd(prev_cwd, sizeof(prev_cwd))) {
-		perror("Failed to get current working directory");
-		return NULL;
-	}
+	if (!getcwd(prev_cwd, sizeof(prev_cwd)))
+		perror("Failed to get current working directory?");
 
-	entries = GetDirectoryEntries(NULL, &cnt);
-	if (!entries) {
-		perror("GetDirectoryEntries failed");
-		return NULL;
-	}
+	GetDirectoryEntries(&entries, NULL, &cnt);
 
 	for(;;) {
-		printf("\x1b[2J");
+		if (!entries) {
+			perror("GetDirectoryEntries failed");
+			return NULL;
+		}
+		printf("\x1b[2JCurrent directory: %s\n\n", pwd());
 		PrintEntries(entries, cnt, index);
 
 		struct entry* entry = entries + index;
@@ -169,22 +175,14 @@ static char* SelectFileMenu() {
 			else if (buttons & WPAD_BUTTON_A) {
 				if (entry->flags & 0x01) {
 					chdir(entry->name);
-					free(entries);
-					entries = GetDirectoryEntries(NULL, &cnt);
+					GetDirectoryEntries(&entries, NULL, &cnt);
 					index = 0;
 					break;
 				}
 				else {
-					if (!getcwd(cwd, sizeof(cwd))) {
-						perror("Failed to get current working directory");
-						return NULL;
-					}
-				//	printf("cwd: %s, name: %s\n", cwd, entry->name);
-					if (filename[sprintf(filename, "%s", cwd) - 1] != '/') sprintf(filename + strlen(filename), "/");
+					if (filename[sprintf(filename, "%s", pwd()) - 1] != '/') strcat(filename, "/");
 					sprintf(filename + strlen(filename), "%s", entry->name);
-				//	printf("Returning to previous cwd %s\n", prev_cwd);
 					chdir(prev_cwd);
-				//	printf("filename: %s\n", filename);
 					return filename;
 				}
 			}
@@ -194,8 +192,7 @@ static char* SelectFileMenu() {
 					else perror("Failed to go to parent dir");
 				}
 				else {
-					free(entries);
-					entries = GetDirectoryEntries(NULL, &cnt);
+					GetDirectoryEntries(&entries, NULL, &cnt);
 					index = 0;
 					break;
 				}
