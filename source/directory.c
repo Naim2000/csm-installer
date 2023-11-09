@@ -12,7 +12,9 @@
 #include <errno.h>
 #include <unistd.h>
 
-static u32 buttons = 0;
+#include "video.h"
+#include "pad.h"
+
 static struct stat statbuf;
 
 struct entry {
@@ -20,38 +22,25 @@ struct entry {
 	char name[NAME_MAX];
 };
 
-static char* pwd() {
+char* pwd() {
 	static char cwd[PATH_MAX];
 	return getcwd(cwd, sizeof(cwd));
 }
 
-static inline void cursorpos(int row, int col) {
-	printf("\x1b[%d;%dH", row, col);
-}
-
-static inline void clear() {
-	printf("\x1b[2J");
-	fflush(stdout);
-}
-
-static inline void scanpads() {
-	WPAD_ScanPads();
-	buttons = WPAD_ButtonsDown(0);
-}
-
-static inline bool isDirectory(const char* path) {
+static bool isDirectory(const char* path) {
 	stat(path, &statbuf);
-	return (S_ISDIR(statbuf.st_mode) > 0);
+	return S_ISDIR(statbuf.st_mode) > 0;
 }
 
-static inline void PrintEntries(struct entry entries[], size_t count, size_t max, size_t selected) {
+static void PrintEntries(struct entry entries[], size_t count, size_t max, size_t selected) {
 	if (!count) {
-		printf("\t\x1b[90m [nothing.] \x1b[39m");
+		printf("\t\x1b[30m[Nothing.]\x1b[39m");
 		return;
 	}
+
 	size_t cnt = (count > max) ? max : count;
 	for (size_t j = 0; j < cnt;) {
-		if ((selected > (max - 2)) && (j < (selected - (max - 2)))) continue;
+		if ((selected > (max - 3)) && (j < (selected - (max - 3)))) continue;
 		if (j == selected) printf(">>");
 		printf("\t%s\n", entries[j].name);
 		j++;
@@ -119,7 +108,11 @@ static struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, siz
 	cnt = GetDirectoryEntryCount(pdir, filter);
 	if (!cnt) {
 		*count = 0;
-		if (*entries) **entries = (struct entry){ 0x01, ".." };
+		if (*entries)
+			(*entries)[0] = (struct entry){ 0x01, ".." };
+		else
+			errno = ENOENT;
+
 		return NULL;
 	}
 
@@ -127,6 +120,7 @@ static struct entry* GetDirectoryEntries(struct entry** entries, DIR* p_dir, siz
 	struct entry* _entries = reallocarray(*entries, cnt, sizeof(struct entry));
 	if (!_entries) {
 		free(*entries);
+		*entries = NULL;
 		errno = ENOMEM;
 		return NULL;
 	}
@@ -155,12 +149,11 @@ char* SelectFileMenu(const char* header, FileFilter filter) {
 	GetDirectoryEntries(&entries, NULL, &cnt, filter);
 
 	for(;;) {
-		if (!entries) {
+		if (!entries) { // true because it never got to change from NULL
 			perror("GetDirectoryEntries failed");
 			return NULL;
 		}
 		clear();
-		cursorpos(2, 0);
 		if (header) printf("%s\n\n", header);
 		printf("Current directory: %s\n\n", pwd());
 		PrintEntries(entries, cnt, max, index);
@@ -168,6 +161,7 @@ char* SelectFileMenu(const char* header, FileFilter filter) {
 		struct entry* entry = entries + index;
 		for(;;) {
 			scanpads();
+			u32 buttons = buttons_down();
 			if (buttons & WPAD_BUTTON_DOWN) {
 				if (index < (cnt - 1)) index += 1;
 				else index = 0;
@@ -194,8 +188,12 @@ char* SelectFileMenu(const char* header, FileFilter filter) {
 			}
 			else if (buttons & WPAD_BUTTON_B) {
 				if (chdir("..") < 0) {
-					if (errno == ENOENT) return NULL;
-					else perror("Failed to go to parent dir");
+					if (errno == ENOENT) {
+						errno = ECANCELED;
+						return NULL;
+					}
+					else
+						perror("Failed to go to parent directory");
 				}
 				else {
 					GetDirectoryEntries(&entries, NULL, &cnt, filter);

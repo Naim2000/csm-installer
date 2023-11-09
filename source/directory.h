@@ -6,6 +6,7 @@
 
 typedef bool (*FileFilter)(const char* name, u8 flags);
 
+char* pwd();
 char* SelectFileMenu(const char* header, FileFilter filter);
 
 static inline const char* fileext(const char* name) {
