@@ -11,6 +11,7 @@
 #include "fs.h"
 #include "directory.h"
 #include "sysmenu.h"
+#include "theme.h"
 
 void* memalign(size_t, size_t);
 unsigned int sleep(unsigned int);
@@ -22,6 +23,9 @@ bool isCSMfile(const char* name, u8 flags) {
 
 int main(int argc, char* argv[]) {
 	int ret;
+	char* file;
+	unsigned char* buffer = NULL;
+	size_t filesize = 0;
 
 	puts("Loading...");
 
@@ -55,37 +59,46 @@ int main(int argc, char* argv[]) {
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	char* file = SelectFileMenu("Select an .app or .csm file.", isCSMfile);
-	if (!file) {
-		perror("Failed to get csm file to install");
-		goto error;
-	}
+	if (argc)
+		file = argv[0];
+	else
+		file = SelectFileMenu("csm-installer 0.0 // Select a .csm or .app file.", isCSMfile);
 
-	unsigned char* buffer = NULL;
-	size_t filesize = 0;
-
-	printf("\n%s\n", file);
+	printf("%s\n", file);
 	ret = FAT_Read(file, &buffer, &filesize, progressbar);
 	if (ret < 0) {
 		printf("error. (%d)\n", ret);
 		goto error;
 	}
 
+	if (SignedTheme(buffer, filesize))
+		printf("\x1b[36mThis theme was signed by wii-themer.\x1b[39m\n\n");
+	else
+		printf("This theme was not signed by wii-themer..!\n\n");
+
+	version_t themeversion = GetThemeVersion(buffer, filesize);
+	if (themeversion.region != getSmRegion()) {
+		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme region : %c\nSystem region: %c\n", themeversion.region, getSmRegion());
+		goto error;
+	}
+	else if (themeversion.major != getSmVersionMajor()) {
+		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme major version : %c\nSystem major version: %c\n", themeversion.major, getSmVersionMajor());
+	}
+
 	sprintf(strrchr(sysmenu_filepath, '/'), "/%08x.app", getArchiveCid());
-	printf("\n%s\n", sysmenu_filepath);
+	printf("%s\n", sysmenu_filepath);
 	ret = FS_Write(sysmenu_filepath, buffer, filesize, progressbar);
 	if (ret < 0) {
 		printf("error. (%d)\n", ret);
 		goto error;
 	}
-	printf("\n\n");
-
 
 error:
+	free(buffer);
 	ISFS_Deinitialize();
 	unmountSD();
 	unmountUSB();
-	puts("Press HOME to exit.");
+	puts("\nPress HOME to exit.");
 	wait_button(WPAD_BUTTON_HOME);
 	WPAD_Shutdown();
 	return 0;

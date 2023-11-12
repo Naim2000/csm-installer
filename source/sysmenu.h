@@ -8,3 +8,5 @@ static char sysmenu_filepath[ISFS_MAXPATH] = "/title/00000001/00000002/content/"
 int sysmenu_process();
 bool hasPriiloader();
 u32 getArchiveCid();
+char getSmVersionMajor();
+char getSmRegion();

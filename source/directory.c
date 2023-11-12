@@ -34,7 +34,7 @@ static bool isDirectory(const char* path) {
 
 static void PrintEntries(struct entry entries[], size_t count, size_t max, size_t selected) {
 	if (!count) {
-		printf("\t\x1b[30m[Nothing.]\x1b[39m");
+		printf("\t\x1b[30;1m[Nothing.]\x1b[39m");
 		return;
 	}
 
@@ -149,7 +149,7 @@ char* SelectFileMenu(const char* header, FileFilter filter) {
 	GetDirectoryEntries(&entries, NULL, &cnt, filter);
 
 	for(;;) {
-		if (!entries) { // true because it never got to change from NULL
+		if (!entries) {
 			perror("GetDirectoryEntries failed");
 			return NULL;
 		}
@@ -157,6 +157,7 @@ char* SelectFileMenu(const char* header, FileFilter filter) {
 		if (header) printf("%s\n\n", header);
 		printf("Current directory: %s\n\n", pwd());
 		PrintEntries(entries, cnt, max, index);
+		putchar('\n');
 
 		struct entry* entry = entries + index;
 		for(;;) {
