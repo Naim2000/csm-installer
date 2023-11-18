@@ -82,7 +82,7 @@ int FAT_Read(const char* filepath, unsigned char** buffer, size_t* filesize, RWC
 	*filesize = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
 	if(!*filesize)
-        return -105;
+        return -ENODATA;
 
 	*buffer = memalign(0x20, *filesize);
 	if(!*buffer) {

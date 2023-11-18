@@ -22,7 +22,7 @@ bool mountSD() {
 		return false;
 	}
 	sd_mounted = fatMountSimple("sd", sd_card);
-	chdir("sd:/");
+//	chdir("sd:/");
 	return sd_mounted;
 }
 
@@ -48,7 +48,7 @@ bool mountUSB() {
 		usb_mounted = fatMountSimple("usb", usb_msc);
 //		if(usb_mounted) break;
 //	}
-	chdir("usb:/");
+//	chdir("usb:/");
 	return usb_mounted;
 }
 

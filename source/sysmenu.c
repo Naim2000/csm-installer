@@ -7,12 +7,25 @@
 #include <ogc/es.h>
 #include <ogc/isfs.h>
 #include <wiiuse/wpad.h>
+#include <ogc/lwp_watchdog.h>
+#include <mbedtls/aes.h>
+
 #include "pad.h"
+#include "fs.h"
 
 void* memalign(size_t, size_t);
 
+static const aeskey vwii_ckey = { 0x30, 0xbf, 0xc7, 0x6e, 0x7c, 0x19, 0xaf, 0xbb, 0x23, 0x16, 0x33, 0x30, 0xce, 0xd7, 0xc2, 0x8d };
+static const aeskey wii_ckey  = { 0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7 };
+
+
+static u64 __smNUSTID = 0x0000000100000002LL;
+static aeskey __smTitleKey = {};
 static int __hasPriiloader = 0;
 static u32 __archiveCid = 0;
+static size_t __archiveSize = 0; // stupid
+static sha1 __archiveHash = {};
+static char __archivePath[ISFS_MAXPATH];
 static u16 __smVersion = 0;
 static s8  __smRegion  = 0;
 static s8  __smMajor   = 0;
@@ -95,6 +108,7 @@ int sysmenu_process() {
 	int ret;
 	u32 size = 0;
 	void* buffer = NULL;
+	char sysmenu_filepath[ISFS_MAXPATH] = "/title/00000001/00000002/content/";
 
 	ret = ES_GetStoredTMDSize(0x100000002LL, &size);
 	if (ret < 0) {
@@ -118,7 +132,7 @@ int sysmenu_process() {
 	tmd* sysmenu_tmd = SIGNATURE_PAYLOAD((signed_blob*)buffer);
 
 	__smVersion = sysmenu_tmd->title_version;
-	printf("System menu version: %hu (%04hx)\n", __smVersion, __smVersion);
+//	printf("System menu version: %hu (%04hx)\n", __smVersion, __smVersion);
 	if (__smVersion > 0x2000) {
 		printf("Bad system menu version! (%hu/%04hx)\nInvalid or not vanilla.\n", __smVersion, __smVersion);
 		ret = -EINVAL;
@@ -126,7 +140,7 @@ int sysmenu_process() {
 	}
 
 	__smRegion = _getSMRegion(__smVersion);
-	printf("System menu region (from rev number): %c\n", __smRegion);
+//	printf("System menu region (from rev number): %c\n", __smRegion);
 	if (!__smRegion) {
 		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify region (what's the last hex digit?)\n", __smVersion, __smVersion);
 		ret = -EINVAL;
@@ -134,18 +148,18 @@ int sysmenu_process() {
 	}
 
 	__smMajor = _getSMVersionMajor(__smVersion);
-	printf("System menu major version (from rev number): %c\n", __smMajor);
+//	printf("System menu major version (from rev number): %c\n", __smMajor);
 	if (!__smMajor) {
 		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify major revision.\n", __smVersion, __smVersion);
 		ret = -EINVAL;
 		goto finish;
 	}
 
-
 	for (int i = 0; i < sysmenu_tmd->num_contents; i++) {
 		tmd_content* content = sysmenu_tmd->contents + i;
 
-		if (content->type == 0x8001) continue;
+		if (content->type == 0x8001)
+			continue;
 
 		if (content->index == sysmenu_tmd->boot_index) { // how Priiloader installer does it
 			sprintf(strrchr(sysmenu_filepath, '/'), "/%08x.app", content->cid);
@@ -170,17 +184,68 @@ int sysmenu_process() {
 
 			if (header == 0x55AA382D) {
 				__archiveCid = content->cid;
-				printf("Found the archive file! (%08x)\n", content->cid);
+				__archiveSize = (size_t)content->size;
+				strcpy(__archivePath, sysmenu_filepath);
+				memcpy(__archiveHash, content->hash, sizeof(sha1));
 				continue;
 			}
 		}
 	}
 
+	if(!__archiveCid) {
+		printf("Failed to identify system menu archive!");
+		ret = -ENOENT;
+		goto finish;
+	}
+
+	free(buffer);
+	buffer = memalign(0x20, STD_SIGNED_TIK_SIZE);
+	if (!buffer) {
+		printf("Failed to allocate space for ticket...?\n");
+		ret = -ENOMEM;
+		goto finish;
+	}
+
+	ret = ISFS_Open("/ticket/00000001/00000002.tik", ISFS_OPEN_READ);
+	if (ret < 0) {
+		printf("Failed to open system menu ticket (%d)\n", ret);
+		goto finish;
+	}
+	ISFS_Read(ret, buffer, STD_SIGNED_TIK_SIZE);
+	ISFS_Close(ret);
+
+	tik* sysmenu_tik = SIGNATURE_PAYLOAD((signed_blob*) buffer);
+
+	aeskey iv = {};
+	mbedtls_aes_context tkey = {};
+	memcpy(iv, &sysmenu_tik->titleid, sizeof(u64));
+	switch (sysmenu_tik->reserved[0xb]) {
+		case 0:
+		//	puts("this is a Wii (common key index is 0)");
+			mbedtls_aes_setkey_dec(&tkey, wii_ckey, sizeof(aeskey) * 8);
+			break;
+		case 2:
+			__smNUSTID |= 0x6LL << 32;
+		//	printf("new NUS title id: %016llx\n", __smNUSTID);
+		//	puts("this is a vWii (common key index is 2)");
+			mbedtls_aes_setkey_dec(&tkey, vwii_ckey, sizeof(aeskey) * 8);
+			break;
+
+		default:
+			printf("Unknown common key index?\n");
+			goto finish;
+	}
+	mbedtls_aes_crypt_cbc(&tkey, MBEDTLS_AES_DECRYPT, sizeof(aeskey), iv, sysmenu_tik->cipher_title_key, __smTitleKey);
+
 finish:
 	free(buffer);
-	printf("Press HOME to continue.\n");
-	wait_button(WPAD_BUTTON_HOME);
+//	printf("Press HOME to continue.\n");
+//	wait_button(WPAD_BUTTON_HOME);
 	return ret;
+}
+
+u64 getSmNUSTitleID() {
+	return __smNUSTID;
 }
 
 bool hasPriiloader() {
@@ -191,8 +256,24 @@ u32 getArchiveCid() {
 	return __archiveCid;
 }
 
-u16 getSMVersion() {
+size_t getArchiveSize() {
+	return __archiveSize;
+}
+
+const char* getArchivePath() {
+	return __archivePath;
+}
+
+u8* getSmTitleKey() {
+	return __smTitleKey;
+}
+
+u16 getSmVersion() {
 	return __smVersion;
+}
+
+u8* getArchiveHash() {
+	return __archiveHash;
 }
 
 char getSmRegion() {

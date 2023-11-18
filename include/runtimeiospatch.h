@@ -20,7 +20,7 @@
 /**
  * Version information for Libruntimeiospatch.
  */
-#define LIB_RUNTIMEIOSPATCH_VERSION "1.5.4"
+#define LIB_RUNTIMEIOSPATCH_VERSION "1.6.0"
 
 //==============================================================================
 // HW_RVL header
@@ -70,6 +70,24 @@ Sciifii:
 vWii:
    * Kill Anti-SystemTitle-Install 1, 2, 3, 4 & 5
 */
+enum patchset: int {
+    no_di_readlimit             = 0x00000001,
+    nand_permissions            = 0x00000002,
+    setuid                      = 0x00000004,
+    identify                    = 0x00000008,
+    trucha                      = 0x00000010,
+    ssl_patch                   = 0x00000020,
+    patchset_wii                = no_di_readlimit | nand_permissions | setuid | identify | trucha | ssl_patch,
+
+    mem2_protection             = 0x00000040,
+    es_contentfd_patch          = 0x00000080,
+    es_versioncheck_patch       = 0x00000100,
+    es_deletecheck_patch        = 0x00000200,
+    patchset_sciifii            = mem2_protection | es_contentfd_patch | es_versioncheck_patch | es_deletecheck_patch,
+
+    kill_antisystitleinstall    = 0x00000400,
+    patchset_vwii               = kill_antisystitleinstall,
+};
 
 
 //==============================================================================
@@ -99,34 +117,30 @@ s32 IosPatch_AHBPROT(bool verbose);
 /**
  * This function applies patches on current IOS
  * @see Patchsets
- * @param wii Flag determing whether or not to apply Wii patches.
- * @param sciifii Flag determing whether or not to apply extra Sciifii patches.
- * @param vwii Flag determing whether or not to apply extra vWii patches.
- * @param verbose Flag determing whether or not to print messages on-screen.
- * @example if(AHBPROT_DISABLED) IosPatch_FULL(true, false, false, false);
+ * @param patches Flags determing the patches you would like to apply.
+ * @param verbose Flag determing whether or not to print messages on screen.
+ * @example if(AHBPROT_DISABLED) IosPatch_RUNTIME(nand_permissions | trucha | kill_antisystitleinstall, false);
  * @return Signed 32bit integer representing code
  *      > 0             : Success   - return equals to number of applied patches
  *      ERROR_AHBPROT   : Error     - No HW_AHBPROT access
  *      ERROR_PATCH     : Error     - Patching HW_AHBPROT access failed
  */
-s32 IosPatch_RUNTIME(bool wii, bool sciifii, bool vwii, bool verbose);
+s32 IosPatch_RUNTIME(enum patchset patches, bool verbose);
 
 
 /**
  * This function combines IosPatch_AHBPROT + IOS_ReloadIOS + IosPatch_RUNTIME
  * @see Patchsets
- * @param wii Flag determing whether or not to apply Wii patches.
- * @param sciifii Flag determing whether or not to apply extra Sciifii patches.
- * @param vwii Flag determing whether or not to apply extra vWii patches.
+ * @param patches Flags determing the patches you would like to apply.
  * @param verbose Flag determing whether or not to print messages on-screen.
  * @param IOS Which IOS to reload into.
- * @example if(AHBPROT_DISABLED) IosPatch_FULL(true, false, false, false, 58);
+ * @example if(AHBPROT_DISABLED) IosPatch_FULL(nand_permissions | trucha | kill_antisystitleinstall, false, 58);
  * @return Signed 32bit integer representing code
  *      > 0             : Success   - return equals to number of applied patches
  *      ERROR_AHBPROT   : Error     - No HW_AHBPROT access
  *      ERROR_PATCH     : Error     - Patching HW_AHBPROT access failed
  */
-s32 IosPatch_FULL(bool wii, bool sciifii, bool vwii, bool verbose, int IOS);
+s32 IosPatch_FULL(enum patchset patches, bool verbose, int IOS);
 
 //==============================================================================
 // C++ footer

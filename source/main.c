@@ -3,16 +3,17 @@
 #include <gccore.h>
 #include <ogc/es.h>
 #include <wiiuse/wpad.h>
-#include <runtimeiospatch.h>
 
-#include "pad.h"
 #include "iospatch.h"
-#include "fatMounter.h"
+#include "pad.h"
 #include "fs.h"
+#include "fatMounter.h"
 #include "directory.h"
 #include "sysmenu.h"
 #include "theme.h"
+#include "network.h"
 
+void __exception_setreload(int);
 void* memalign(size_t, size_t);
 unsigned int sleep(unsigned int);
 [[gnu::weak]] void OSReport(const char* fmt, ...) {};
@@ -23,78 +24,90 @@ bool isCSMfile(const char* name, u8 flags) {
 
 int main(int argc, char* argv[]) {
 	int ret;
-	char* file;
+	char* file = NULL;
 	unsigned char* buffer = NULL;
 	size_t filesize = 0;
 
-	puts("Loading...");
+	int restore = 0;
 
-	initpads();
+	__exception_setreload(15);
+
+	if (argc) {
+		for(int i = 0; i < argc; i++) {
+			char* arg = argv[i];
+
+			if (arg[0] != '-')
+				continue;
+
+			switch(arg[1]) {
+				case 'i':
+					file = (arg[2] == ':' || arg[2] == '=')?
+						arg + 3 :
+						argv[++i];
+					break;
+				case 'r':
+					restore++;
+					break;
+			}
+		}
+	}
+
+	puts("Loading...\nHold + to restore original theme!");
 
 	if (patchIOS(false) < 0) {
 		puts("failed to apply IOS patches...");
 		goto error;
 	}
 
-	if (!mountSD() && !mountUSB()) {
+	if (!fatInitDefault()) {
 		puts("Unable to mount a storage device...");
 		goto error;
 	}
 
 	ISFS_Initialize();
 
+	initpads();
+
 	if (sysmenu_process() < 0)
 		goto error;
 
-	if (!getArchiveCid()) {
-		puts("Failed to identify system menu archive!");
+	sleep(2);
+	scanpads();
+	if (buttons_down(WPAD_BUTTON_PLUS))
+		restore++;
+
+	if (restore) {
+		ret = InstallOriginalTheme();
 		goto error;
 	}
 
 	if (!hasPriiloader()) {
 		puts("Please install Priiloader...");
-		sleep(2);
+		sleep(1);
 
 		puts("Press A to continue");
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	if (argc)
-		file = argv[0];
-	else
-		file = SelectFileMenu("csm-installer 0.0 // Select a .csm or .app file.", isCSMfile);
+	if (!file)
+		file = SelectFileMenu("Select a .csm or .app file.", isCSMfile);
+	if (!file) {
+		perror("SelectFileMenu failed");
+		goto error;
+	}
 
 	printf("%s\n", file);
 	ret = FAT_Read(file, &buffer, &filesize, progressbar);
 	if (ret < 0) {
-		printf("error. (%d)\n", ret);
+		printf("failed! (%d)\n", ret);
 		goto error;
 	}
 
-	if (SignedTheme(buffer, filesize))
-		printf("\x1b[36mThis theme was signed by wii-themer.\x1b[39m\n\n");
-	else
-		printf("This theme was not signed by wii-themer..!\n\n");
-
-	version_t themeversion = GetThemeVersion(buffer, filesize);
-	if (themeversion.region != getSmRegion()) {
-		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme region : %c\nSystem region: %c\n", themeversion.region, getSmRegion());
-		goto error;
-	}
-	else if (themeversion.major != getSmVersionMajor()) {
-		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme major version : %c\nSystem major version: %c\n", themeversion.major, getSmVersionMajor());
-	}
-
-	sprintf(strrchr(sysmenu_filepath, '/'), "/%08x.app", getArchiveCid());
-	printf("%s\n", sysmenu_filepath);
-	ret = FS_Write(sysmenu_filepath, buffer, filesize, progressbar);
-	if (ret < 0) {
-		printf("error. (%d)\n", ret);
-		goto error;
-	}
+	InstallTheme(buffer, filesize);
 
 error:
 	free(buffer);
+	network_deinit();
 	ISFS_Deinitialize();
 	unmountSD();
 	unmountUSB();
