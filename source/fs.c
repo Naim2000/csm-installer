@@ -161,7 +161,7 @@ int FAT_Write(const char* filepath, unsigned char* buffer, size_t filesize, RWCa
 	if (wrote == filesize)
 		return 0;
 	else if (errno) //?
-		return errno;
+		return -errno;
 	else
 		return -EIO;
 }
