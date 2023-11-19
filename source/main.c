@@ -54,19 +54,21 @@ int main(int argc, char* argv[]) {
 
 	puts("Loading...\nHold + to restore original theme!");
 
+
 	if (patchIOS(false) < 0) {
-		puts("failed to apply IOS patches...");
-		goto error;
+		puts("failed to apply IOS patches! Exiting in 5...");
+		sleep(5);
+		exit(-1);
 	}
 
-	if (!fatInitDefault()) {
+	initpads();
+
+	if (!mountSD() && !mountUSB()) {
 		puts("Unable to mount a storage device...");
 		goto error;
 	}
 
 	ISFS_Initialize();
-
-	initpads();
 
 	if (sysmenu_process() < 0)
 		goto error;
