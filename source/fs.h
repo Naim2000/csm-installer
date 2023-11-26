@@ -8,6 +8,7 @@ typedef int (*RWCallback)(size_t read, size_t filesize);
 #define FS_CHUNK 1048576
 #endif
 
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types" // shut the hell up gcc
 int FS_Read(const char* filepath, unsigned char** buffer, size_t* filesize, RWCallback cb);
 int FS_Write(const char* filepath, unsigned char* buffer, size_t filesize, RWCallback cb);
 int FAT_Read(const char* filepath, unsigned char** buffer, size_t* filesize, RWCallback cb);

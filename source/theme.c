@@ -29,17 +29,17 @@ static int FindString(void* buf, size_t size, const char* str) {
 	return -1;
 }
 
-int SignedTheme(unsigned char* buffer, size_t length) {
+SignatureLevel SignedTheme(unsigned char* buffer, size_t length) {
 	sha1 hash = {};
 	mbedtls_sha1_ret(buffer, length, hash);
 
 	if (memcmp(hash, getArchiveHash(), sizeof(sha1)) == 0)
-		return 2;
+		return default_theme;
 	else if (FindString(buffer, length, wiithemer_sig) >= 0)
-		return 1;
+		return wiithemer_signed;
 
 
-	return 0;
+	return unknown;
 }
 
 version_t GetThemeVersion(unsigned char* buffer, size_t length) {
@@ -56,7 +56,7 @@ version_t GetThemeVersion(unsigned char* buffer, size_t length) {
 int InstallTheme(unsigned char* buffer, size_t size) {
 	if (*(u16*)buffer == ('P' << 8 | 'K')) {
 		puts("\x1b[31;1mPlease do not rename .mym files.\x1b[39m\n"
-			"Visit https://wii.hacks.guide/themes to properly convert it."
+			"Follow https://wii.hacks.guide/themes to properly convert it."
 		);
 		return -EINVAL;
 	}
@@ -66,10 +66,10 @@ int InstallTheme(unsigned char* buffer, size_t size) {
 	}
 
 	switch (SignedTheme(buffer, size)) {
-		case 2:
+		case default_theme:
 			puts("\x1b[32;1mThis is the default theme for your Wii menu.\x1b[39m");
 			break;
-		case 1:
+		case wiithemer_signed:
 			puts("\x1b[36;1mThis theme was signed by wii-themer.\x1b[39m");
 			break;
 
@@ -77,6 +77,7 @@ int InstallTheme(unsigned char* buffer, size_t size) {
 			puts("\x1b[30;1mThis theme isn't signed...\x1b[39m");
 			break;
 	}
+
 	putchar('\n');
 
 	version_t themeversion = GetThemeVersion(buffer, size);
@@ -107,18 +108,27 @@ int InstallOriginalTheme() {
 	char filepath[16];
 
 	puts("Installing original theme.");
-	sprintf(filepath, "%08x.app", getArchiveCid());
-	int ret = FAT_Read(filepath, &download.ptr, &download.size, NULL);
+
+	int ret = FS_Read(getArchivePath(), &download.ptr, &download.size, NULL);
 	if (ret >= 0) {
 		if (SignedTheme(download.ptr, download.size) == 2) {
-			goto install;
-		} else {
-			free(download.ptr);
-			download = (blob){};
+			puts("You still have the original theme.");
+			return 0;
 		}
 
+		free(download.ptr);
+		download = (blob){};
 	}
 
+	sprintf(filepath, "%08x.app", getArchiveCid());
+	ret = FAT_Read(filepath, &download.ptr, &download.size, NULL);
+	if (ret >= 0) {
+		if (SignedTheme(download.ptr, download.size) == 2)
+			goto install;
+
+		free(download.ptr);
+		download = (blob){};
+	}
 
 	printf("Initializing network... ");
 	ret = network_init();
