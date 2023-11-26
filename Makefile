@@ -15,7 +15,7 @@ include $(DEVKITPPC)/wii_rules
 # SOURCES is a list of directories containing source code
 # INCLUDES is a list of directories containing extra header files
 #---------------------------------------------------------------------------------
-TARGET		:=	$(notdir $(CURDIR))
+TARGET		:=	csm-installer
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
@@ -102,7 +102,7 @@ $(BUILD):
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).dol
+	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).dol $(OUTPUT).zip apps/$(TARGET)/boot.dol
 
 #---------------------------------------------------------------------------------
 run:
@@ -110,6 +110,10 @@ run:
 
 
 #---------------------------------------------------------------------------------
+pack: $(BUILD)
+	@cp $(TARGET).dol apps/$(TARGET)/boot.dol
+	zip -r $(OUTPUT).zip apps/
+
 else
 
 DEPENDS	:=	$(OFILES:.o=.d)
