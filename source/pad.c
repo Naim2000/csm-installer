@@ -2,6 +2,8 @@
 #include <wiiuse/wpad.h>
 #include <ogc/pad.h>
 
+#include "pad.h"
+
 static u32 pad_buttons, pad_buttons_held;
 
 void initpads() {
@@ -42,7 +44,7 @@ void scanpads() {
 
 void wait_button(u32 button) {
 	scanpads();
-	while (!(pad_buttons & button /* == button ? */) )
+	while (!(pad_buttons & (button? button : ~0)) )
 		scanpads();
 }
 

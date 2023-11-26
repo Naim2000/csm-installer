@@ -15,7 +15,6 @@
 #include "video.h"
 #include "pad.h"
 
-static struct stat statbuf;
 
 struct entry {
 	u8 flags;
@@ -25,27 +24,27 @@ struct entry {
 static char cwd[PATH_MAX];
 
 bool isDirectory(const char* path) {
+	struct stat statbuf;
 	stat(path, &statbuf);
 	return S_ISDIR(statbuf.st_mode) > 0;
 }
 
-static void PrintEntries(struct entry entries[], size_t count, size_t max, size_t selected) {
+static void PrintEntries(struct entry entries[], int count, int max, int selected) {
 	if (!count) {
 		printf("\t\x1b[30;1m[Nothing.]\x1b[39m");
 		return;
 	}
 
-	size_t cnt = (count > max) ? max : count;
-	for (size_t j = 0; j < cnt; ) {
-		if ((selected > (max - 3)) && (j < (selected - (max - 3)))) continue;
-		if (j == selected) printf(">>");
-		printf("\t%s\n", entries[j].name);
-		j++;
+	int i = 0;
+	if (selected > (max - 4)) i += (selected - (max - 4));
+	for (int j = 0; i < count && j < max; j++) {
+		if (i == selected) printf(">>");
+		printf("\t%s\n", entries[i++].name);
 	}
 }
 
-static size_t GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
-	size_t count = 0;
+static int GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
+	int count = 0;
 	struct dirent* pent;
 
 	if (!pdir)
@@ -59,7 +58,7 @@ static size_t GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
 		bool isdir = isDirectory(cwd);
 		*(strrchr(cwd, '/') + 1) = '\x00';
 
-		if (!filter || filter(pent->d_name, isdir))
+		if (isdir || !filter || filter(pent->d_name))
 			count++;
 	}
 
@@ -67,11 +66,11 @@ static size_t GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
 	return count;
 }
 
-static size_t ReadDirectory(DIR* pdir, struct entry entries[], size_t count, FileFilter filter) {
+static int ReadDirectory(DIR* pdir, struct entry entries[], int count, FileFilter filter) {
 	if (!pdir)
 		return 0;
 
-	size_t i = 0;
+	int i = 0;
 	while (i < count) {
 		struct dirent* pent = readdir(pdir);
 		if (!pent)
@@ -84,21 +83,25 @@ static size_t ReadDirectory(DIR* pdir, struct entry entries[], size_t count, Fil
 		bool isdir = isDirectory(cwd);
 		*(strrchr(cwd, '/') + 1) = '\x00';
 
-		if (filter && !filter(pent->d_name, isdir))
+		if (!isdir && filter && !filter(pent->d_name))
 			continue;
 
 		entries[i].flags =
 			(isdir << 0);
+
 		strcpy(entries[i].name, pent->d_name);
+		if (isdir)
+			strcat(entries[i].name, "/");
+
 		i++;
 	}
 
 	return i;
 }
 
-static struct entry* GetDirectoryEntries(const char* path, struct entry** entries, size_t* count, FileFilter filter) {
+static struct entry* GetDirectoryEntries(const char* path, struct entry** entries, int* count, FileFilter filter) {
 	DIR* pdir;
-	size_t cnt = 0;
+	int cnt = 0;
 
 	if (!entries || !count || !path) return NULL;
 	if (!(pdir = opendir(path)))
@@ -131,48 +134,63 @@ static struct entry* GetDirectoryEntries(const char* path, struct entry** entrie
 	return *entries;
 }
 
-char* SelectFileMenu(const char* header, FileFilter filter) {
+char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter filter) {
 	struct entry* entries = NULL;
 	int index = 0;
-	size_t cnt = 0, max = MAX_ENTRIES;
+	int cnt = 0, max = MAX_ENTRIES;
 	static char filename[PATH_MAX];
 
 	if (header)
-		max -= 2;
+		max--;
 
 	getcwd(cwd, sizeof(cwd));
-	OSReport("cwd=%s", cwd);
-
-	GetDirectoryEntries(cwd, &entries, &cnt, filter);
+	sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
+	if (!GetDirectoryEntries(cwd, &entries, &cnt, filter)) {
+		*strrchr(cwd, '/') = '\x00';
+		*(strrchr(cwd, '/') + 1) = '\x00';
+		GetDirectoryEntries(cwd, &entries, &cnt, filter);
+	}
 
 	for(;;) {
 		if (!entries) {
 			perror("GetDirectoryEntries failed");
 			return NULL;
 		}
+
 		clear();
 		if (header)
-			printf("%s\n\n", header);
-
-		printf("Current directory: %s\n\n", cwd);
-		PrintEntries(entries, cnt, max, index);
-		putchar('\n');
+			printf("%s\n", header);
 
 		struct entry* entry = entries + index;
+		printf("Current directory: [%s]\n\n", cwd);
+		PrintEntries(entries, cnt, max, index);
+		printf("\x1b[23;0H"
+		//	"Controls:\n"
+			"	A/RIGHT: %-7s		UP/DOWN   : Select\n"
+			"	B/LEFT : %-7s		HOME/START: Exit\n",
+			entry->flags & 0x01 ? "Enter" :
+				(entry->flags & 0x80 ? "Go Back" : "\x1b[32;1mInstall\x1b[39m"), // mighty stupid
+			(strchr(cwd, '/') == strrchr(cwd, '/')) ? "Exit" : "Go back"
+		);
+
 		for(;;) {
 			scanpads();
-			u32 buttons = buttons_down(0);
+			u32 buttons = buttons_down();
 			if (buttons & WPAD_BUTTON_DOWN) {
-				if (index < (cnt - 1)) index += 1;
-				else index = 0;
+				if (index < (cnt - 1))
+					index += 1;
+				else
+					index = 0;
 				break;
 			}
 			else if (buttons & WPAD_BUTTON_UP) {
-				if (index > 0) index -= 1;
-				else index = cnt - 1;
+				if (index > 0)
+					index -= 1;
+				else
+					index = cnt - 1;
 				break;
 			}
-			else if (buttons & WPAD_BUTTON_A) {
+			else if (buttons & (WPAD_BUTTON_A | WPAD_BUTTON_RIGHT)) {
 				if (entry->flags & 0x80) {
 					*strrchr(cwd, '/') = '\x00';
 					*(strrchr(cwd, '/') + 1) = '\x00';
@@ -182,7 +200,7 @@ char* SelectFileMenu(const char* header, FileFilter filter) {
 				}
 				if (entry->flags & 0x01) {
 				//	chdir(entry->name);
-					sprintf(strrchr(cwd, '/'), "/%s/", entry->name);
+					sprintf(strrchr(cwd, '/'), "/%s", entry->name);
 					GetDirectoryEntries(cwd, &entries, &cnt, filter);
 					index = 0;
 					break;
@@ -191,11 +209,13 @@ char* SelectFileMenu(const char* header, FileFilter filter) {
 				//	if (filename[sprintf(filename, "%s", pwd()) - 1] != '/') strcat(filename, "/");
 					strcpy(filename, cwd);
 					strcat(filename, entry->name);
+					free(entries);
 					return filename;
 				}
+				break;
 			}
-			else if (buttons & WPAD_BUTTON_B) {
-				if (strchr(cwd, '/') == strrchr(cwd, '/')) {
+			else if (buttons & (WPAD_BUTTON_B | WPAD_BUTTON_LEFT)) {
+				if (strchr(cwd, '/') == strrchr(cwd, '/')) { // sd:/ <-- first and last /
 					errno = ECANCELED;
 					return NULL;
 				}
@@ -212,6 +232,7 @@ char* SelectFileMenu(const char* header, FileFilter filter) {
 			else if (buttons & WPAD_BUTTON_HOME) {
 				errno = ECANCELED;
 				return NULL;
+				break;
 			}
 		}
 	}

@@ -4,10 +4,10 @@
 
 #define MAX_ENTRIES 25
 
-typedef bool (*FileFilter)(const char* name, u8 flags);
+typedef bool (*FileFilter)(const char* name);
 
 char* pwd();
-char* SelectFileMenu(const char* header, FileFilter filter);
+char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter filter);
 
 static inline const char* fileext(const char* name) {
 	if ((name = strrchr(name, '.'))) name += 1;

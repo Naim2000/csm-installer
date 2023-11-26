@@ -9,6 +9,7 @@
 #include <curl/curl.h>
 
 static int network_up = false;
+static char ebuffer[CURL_ERROR_SIZE] = {};
 
 typedef struct xferinfo_data_s {
 	u64 start;
@@ -39,9 +40,10 @@ static int xferinfo_cb(void* userp, curl_off_t dltotal, curl_off_t dlnow, curl_o
 	xferinfo_data* data = userp;
 
 	u64 now = gettime();
-	u32 elapsed = diff_sec(data->start, now);
+	u32 elapsed = diff_msec(data->start, now);
 
-	printf("\r%llu/%llu bytes // %.2f KB/s...", dlnow, dltotal, ((double)dlnow / 0x400) / elapsed);
+	printf("\r%llu/%llu bytes // %.2f KB/s...",
+		   dlnow, dltotal, 		((double)dlnow / 0x400) / ((double)elapsed / 1000));
 
 	return 0;
 }
@@ -78,18 +80,28 @@ int DownloadFile(char* url, blob* blob) {
 
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, ebuffer);
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_cb);
 	curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &data);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToBlob);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, blob);
+	ebuffer[0] = '\x00';
 	data.start = gettime();
 	res = curl_easy_perform(curl);
 	putchar('\n');
 	curl_easy_cleanup(curl);
 
+	if (res != CURLE_OK) {
+		if (!ebuffer[0])
+			sprintf(ebuffer, "%s", curl_easy_strerror(res));
+	}
+
 	return res;
 }
 
+const char* GetLastDownloadError() {
+	return ebuffer;
+}
 
 

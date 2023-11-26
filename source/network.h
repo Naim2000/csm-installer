@@ -8,3 +8,4 @@ typedef struct {
 int network_init();
 void network_deinit();
 int DownloadFile(char* url, blob*);
+const char* GetLastDownloadError();

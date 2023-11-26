@@ -17,8 +17,8 @@
 
 static const char
 	wiithemer_sig[] = "wiithemer",
-	binary_path_search[] = "C:\\Revolution\\ipl\\System",
-	binary_path_fmt[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c%*s\\main.elf";
+	binary_path_search[] = "C:\\Revolution\\ipl\\",
+	binary_path_fmt[] = "System%c_%c\\ipl\\bin\\RVL\\Final_%c";
 
 static int FindString(void* buf, size_t size, const char* str) {
 	int len = strlen(str);
@@ -54,21 +54,27 @@ version_t GetThemeVersion(unsigned char* buffer, size_t length) {
 }
 
 int InstallTheme(unsigned char* buffer, size_t size) {
-	if (*(u32*)buffer != 0x55AA382D) {
-		puts("Not a theme!");
+	if (*(u16*)buffer == ('P' << 8 | 'K')) {
+		puts("\x1b[31;1mPlease do not rename .mym files.\x1b[39m\n"
+			"Visit https://wii.hacks.guide/themes to properly convert it."
+		);
+		return -EINVAL;
+	}
+	else if (*(u32*)buffer != 0x55AA382D) {
+		puts("\x1b[31;1mNot a theme!\x1b[39m");
 		return -EINVAL;
 	}
 
 	switch (SignedTheme(buffer, size)) {
 		case 2:
-			puts("\x1b[32mThis is the default theme for your Wii menu.\x1b[39m");
+			puts("\x1b[32;1mThis is the default theme for your Wii menu.\x1b[39m");
 			break;
 		case 1:
-			puts("\x1b[36mThis theme was signed by wii-themer.\x1b[39m");
+			puts("\x1b[36;1mThis theme was signed by wii-themer.\x1b[39m");
 			break;
 
 		default:
-			puts("This theme isn't signed...");
+			puts("\x1b[30;1mThis theme isn't signed...\x1b[39m");
 			break;
 	}
 	putchar('\n');
@@ -97,13 +103,25 @@ int InstallOriginalTheme() {
 	char url[0x80] = "http://nus.cdn.shop.wii.com/ccs/download/";
 	blob download = {};
 	mbedtls_aes_context title = {};
-	aeskey iv = { 0, 1 };
+	aeskey iv = { 0x00, 0x01 };
 	char filepath[16];
 
 	puts("Installing original theme.");
+	sprintf(filepath, "%08x.app", getArchiveCid());
+	int ret = FAT_Read(filepath, &download.ptr, &download.size, NULL);
+	if (ret >= 0) {
+		if (SignedTheme(download.ptr, download.size) == 2) {
+			goto install;
+		} else {
+			free(download.ptr);
+			download = (blob){};
+		}
+
+	}
+
 
 	printf("Initializing network... ");
-	int ret = network_init();
+	ret = network_init();
 	if (ret < 0) {
 		printf("failed! (%d)\n", ret);
 		return ret;
@@ -114,7 +132,10 @@ int InstallOriginalTheme() {
 	sprintf(strrchr(url, '/'), "/%016llx/%08x", getSmNUSTitleID(), getArchiveCid()); // TODO: vwii // done ?
 	ret = DownloadFile(url, &download);
 	if (ret != 0) {
-		printf("Download failed! (%d)\n", ret);
+		printf(
+			"Download failed! (%d)\n"
+			"Error details:\n"
+			"	%s\n", ret, GetLastDownloadError());
 		return ret;
 	}
 
@@ -123,11 +144,11 @@ int InstallOriginalTheme() {
 	mbedtls_aes_crypt_cbc(&title, MBEDTLS_AES_DECRYPT, download.size, iv, download.ptr, download.ptr);
 
 	puts("Saving...");
-	sprintf(filepath, "%08x.app", getArchiveCid());
 	ret = FAT_Write(filepath, download.ptr, getArchiveSize(), progressbar);
 	if (ret < 0)
 		printf("Failed to save! (%d)\n", ret);
 
+install:
 	puts("Installing...");
 	ret = InstallTheme(download.ptr, getArchiveSize());
 	free(download.ptr);

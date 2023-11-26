@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <gccore.h>
 #include <ogc/es.h>
 #include <wiiuse/wpad.h>
 
+#include "video.h"
 #include "iospatch.h"
 #include "pad.h"
 #include "fs.h"
@@ -18,8 +20,8 @@ void* memalign(size_t, size_t);
 unsigned int sleep(unsigned int);
 [[gnu::weak]] void OSReport(const char* fmt, ...) {};
 
-bool isCSMfile(const char* name, u8 flags) {
-	return (flags & 0x01) || (fileext(name) && (strequal(fileext(name), "app") || strequal(fileext(name), "csm")));
+bool isCSMfile(const char* name) {
+	return(fileext(name) && (strequal(fileext(name), "app") || strequal(fileext(name), "csm")));
 }
 
 int main(int argc, char* argv[]) {
@@ -52,7 +54,10 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	puts("Loading...\nHold + to restore original theme!");
+	puts(
+		"Loading...\n"
+		"Hold + to restore original theme!"
+		"	\x1b[30;1m(timing untested with real Wii Remote)\x1b[39m");
 
 	if (patchIOS(false) < 0) {
 		puts("failed to apply IOS patches...");
@@ -82,21 +87,35 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (!hasPriiloader()) {
-		puts("Please install Priiloader...");
+		printf("\x1b[30;1mPlease install Priiloader...\x1b[39m\n\n");
 		sleep(1);
 
-		puts("Press A to continue");
+		puts("Press A to continue.");
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	if (!file)
-		file = SelectFileMenu("Select a .csm or .app file.", isCSMfile);
-	if (!file) {
-		perror("SelectFileMenu failed");
-		goto error;
+	if (file)
+		goto install;
+
+	for (;;) {
+		file = SelectFileMenu("Select a .csm or .app file.", "themes", isCSMfile);
+		clear();
+
+		if (!file) {
+			perror("SelectFileMenu failed");
+			goto error;
+		}
+
+		printf("Installing theme %s. Is this OK?\n"
+				"Press +/START to confirm.\n"
+				"Press any other button to cancel.\n", file);
+
+		wait_button(0);
+		if (buttons_down(WPAD_BUTTON_PLUS))
+			break;
 	}
 
-	printf("%s\n", file);
+install:
 	ret = FAT_Read(file, &buffer, &filesize, progressbar);
 	if (ret < 0) {
 		printf("failed! (%d)\n", ret);
