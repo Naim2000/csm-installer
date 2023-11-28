@@ -8,11 +8,6 @@
 
 #include "fs.h"
 
-extern void* memalign(size_t, size_t);
-
-[[gnu::aligned(0x20)]] static fstats stats;
-[[gnu::aligned(0x20)]] static unsigned char tmp_buf[FS_CHUNK];
-
 int progressbar(size_t read, size_t total) {
 	printf("\r[");
 	for (size_t i = 0; i < total; i += FS_CHUNK) {
@@ -22,109 +17,104 @@ int progressbar(size_t read, size_t total) {
 			putchar(' ');
 	}
 	printf("] %u / %u bytes (%.2f%%) ", read, total, (read / (double)total) * 100);
-	if (read == total) putchar('\n');
+	if (read == total)
+		putchar('\n');
 
 	return 0;
 }
 
-int FS_Read(const char* filepath, unsigned char** buffer, size_t* filesize, RWCallback callback) {
+int NAND_GetFileSize(const char* filepath) {
+	[[gnu::aligned(0x20)]] fstats file_stats;
+
+	int fd = ISFS_Open(filepath, 0);
+	if (fd > 0)
+		return fd;
+
+	int ret = ISFS_GetFileStats(fd, &file_stats);
+	if (ret > 0)
+		return ret;
+
+	ISFS_Close(fd);
+	return (int)file_stats.file_length;
+}
+
+size_t FAT_GetFileSize(const char* filepath) {
+	FILE* fp = fopen(filepath, "rb");
+	if (!fp)
+		return 0;
+
+	fseek(fp, 0, SEEK_END);
+	size_t len = ftell(fp);
+	fclose(fp);
+	if (!len)
+		errno = ENODATA;
+
+	return len;
+}
+
+int NAND_Read(const char* filepath, void* buffer, size_t filesize, RWCallback callback) {
+	if (!filesize || !buffer) return -EINVAL;
+
 	int ret = ISFS_Open(filepath, ISFS_OPEN_READ);
 	if (ret < 0)
 		return ret;
 
 	int fd = ret;
-
-	if (!*filesize) {
-		ret = ISFS_GetFileStats(fd, &stats);
-		if (ret < 0) {
-			ISFS_Close(fd);
-			return ret;
-		}
-		*filesize = stats.file_length;
-	}
-	if (!*buffer)
-		*buffer = memalign(0x20, *filesize);
-	if (!*buffer) {
-		ISFS_Close(fd);
-		return -ENOMEM;
-	}
-
 	size_t read = 0;
-	while (read < *filesize) {
-		size_t _read = MAXIMUM(FS_CHUNK, (*filesize) - read);
-		ret = ISFS_Read(fd, tmp_buf, _read);
+	while (read < filesize) {
+		ret = ISFS_Read(fd, buffer + read, MAXIMUM(FS_CHUNK, filesize - read));
 		if (ret <= 0)
 			break;
 
-		memcpy((*buffer) + read, tmp_buf, ret);
 		read += ret;
-		if (callback) callback(read, *filesize);
+		if (callback) callback(read, filesize);
 	}
 
 	ISFS_Close(fd);
 
-	if (read == *filesize)
+	if (read == filesize)
 		return 0;
 
-	free(*buffer);
 	if (ret < 0)
 		return ret;
 	else
 		return -EIO;
 }
 
-int FAT_Read(const char* filepath, unsigned char** buffer, size_t* filesize, RWCallback callback) {
+int FAT_Read(const char* filepath, void* buffer, size_t filesize, RWCallback callback) {
 	FILE* fp = fopen(filepath, "rb");
 	if (!fp)
         return -errno;
 
-	fseek(fp, 0, SEEK_END);
-	*filesize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-	if(!*filesize)
-        return -ENODATA;
-
-	*buffer = memalign(0x20, *filesize);
-	if(!*buffer) {
-		fclose(fp);
-		return -ENOMEM;
-	};
-
 	size_t read = 0;
-	while (read < *filesize) {
-		size_t chunk = MAXIMUM(FS_CHUNK, (*filesize) - read);
-		size_t _read = fread(tmp_buf, 1, chunk, fp);
+	while (read < filesize) {
+		size_t _read = fread(buffer + read, 1, MAXIMUM(FS_CHUNK, filesize - read), fp);
 		if (!_read)
 			break;
 
-		memcpy((*buffer) + read, tmp_buf, _read);
 		read += _read;
-		if (callback) callback(read, *filesize);
+		if (callback) callback(read, filesize);
 	}
 	fclose(fp);
 
-	if (read == *filesize)
+	if (read == filesize)
 		return 0;
 
-	free(*buffer);
 	if (errno) //?
 		return -errno;
 	else
 		return -EIO;
 }
 
-int FS_Write(const char* filepath, unsigned char* buffer, size_t filesize, RWCallback callback) {
+int NAND_Write(const char* filepath, void* buffer, size_t filesize, RWCallback callback) {
 	int ret = ISFS_Open(filepath, ISFS_OPEN_WRITE);
 	if (ret < 0)
 		return ret;
 
 	int fd = ret;
-
 	size_t wrote = 0;
 	while (wrote < filesize) {
-		size_t _count = MAXIMUM(FS_CHUNK, filesize - wrote);
-		memcpy(tmp_buf, buffer + wrote, _count);
-		ret = ISFS_Write(fd, tmp_buf, _count);
+		ret = ISFS_Write(fd, buffer + wrote, MAXIMUM(FS_CHUNK, filesize - wrote));
 		if (ret <= 0)
 			break;
 
@@ -141,15 +131,14 @@ int FS_Write(const char* filepath, unsigned char* buffer, size_t filesize, RWCal
 		return -EIO;
 }
 
-int FAT_Write(const char* filepath, unsigned char* buffer, size_t filesize, RWCallback callback) {
-	FILE *fp = fopen(filepath, "wb");
-	if (!fp) return -errno;
+int FAT_Write(const char* filepath, void* buffer, size_t filesize, RWCallback callback) {
+	FILE* fp = fopen(filepath, "wb");
+	if (!fp)
+		return -errno;
 
 	size_t wrote = 0;
 	while (wrote < filesize) {
-		size_t _count = MAXIMUM(FS_CHUNK, filesize - wrote);
-		memcpy(tmp_buf, buffer + wrote, _count);
-		size_t _wrote = fwrite(tmp_buf, 1, _count, fp);
+		size_t _wrote = fwrite(buffer + wrote, 1, MAXIMUM(FS_CHUNK, filesize - wrote), fp);
 		if (!_wrote)
 			break;
 
@@ -160,7 +149,7 @@ int FAT_Write(const char* filepath, unsigned char* buffer, size_t filesize, RWCa
 
 	if (wrote == filesize)
 		return 0;
-	else if (errno) //?
+	else if (errno) // tends to be set
 		return -errno;
 	else
 		return -EIO;

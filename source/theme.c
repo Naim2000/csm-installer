@@ -91,7 +91,7 @@ int InstallTheme(unsigned char* buffer, size_t size) {
 	}
 
 	printf("%s\n", getArchivePath());
-	int ret = FS_Write(getArchivePath(), buffer, size, progressbar);
+	int ret = NAND_Write(getArchivePath(), buffer, size, progressbar);
 	if (ret < 0) {
 		printf("error. (%d)\n", ret);
 		return ret;
@@ -101,6 +101,7 @@ int InstallTheme(unsigned char* buffer, size_t size) {
 }
 
 int InstallOriginalTheme() {
+	int ret;
 	char url[0x80] = "http://nus.cdn.shop.wii.com/ccs/download/";
 	blob download = {};
 	mbedtls_aes_context title = {};
@@ -109,26 +110,26 @@ int InstallOriginalTheme() {
 
 	puts("Installing original theme.");
 
-	int ret = FS_Read(getArchivePath(), &download.ptr, &download.size, NULL);
+	void* buffer = memalign(0x20, getArchiveSize());
+	if (!buffer) {
+		printf("No memory...??? (failed to allocate %zu bytes)\n", getArchiveSize());
+		return -ENOMEM;
+	}
+
+
+	ret = NAND_Read(getArchivePath(), buffer, getArchiveSize(), NULL);
 	if (ret >= 0) {
-		if (SignedTheme(download.ptr, download.size) == 2) {
+		if (SignedTheme(buffer, getArchiveSize()) == 2) {
 			puts("You still have the original theme.");
 			return 0;
 		}
-
-		free(download.ptr);
-		download = (blob){};
 	}
 
 	sprintf(filepath, "%08x.app", getArchiveCid());
-	ret = FAT_Read(filepath, &download.ptr, &download.size, NULL);
-	if (ret >= 0) {
-		if (SignedTheme(download.ptr, download.size) == 2)
+	ret = FAT_Read(filepath, buffer, getArchiveSize(), NULL);
+	if (ret >= 0)
+		if (SignedTheme(buffer, getArchiveSize()) == 2)
 			goto install;
-
-		free(download.ptr);
-		download = (blob){};
-	}
 
 	printf("Initializing network... ");
 	ret = network_init();
@@ -139,7 +140,7 @@ int InstallOriginalTheme() {
 	puts("ok.");
 
 	puts("Downloading...");
-	sprintf(strrchr(url, '/'), "/%016llx/%08x", getSmNUSTitleID(), getArchiveCid()); // TODO: vwii // done ?
+	sprintf(strrchr(url, '/'), "/%016llx/%08x", getSmNUSTitleID(), getArchiveCid());
 	ret = DownloadFile(url, &download);
 	if (ret != 0) {
 		printf(
@@ -152,15 +153,17 @@ int InstallOriginalTheme() {
 	puts("Decrypting...");
 	mbedtls_aes_setkey_dec(&title, getSmTitleKey(), sizeof(aeskey) * 8);
 	mbedtls_aes_crypt_cbc(&title, MBEDTLS_AES_DECRYPT, download.size, iv, download.ptr, download.ptr);
+	memcpy(buffer, download.ptr, getArchiveSize());
+	free(download.ptr);
 
 	puts("Saving...");
-	ret = FAT_Write(filepath, download.ptr, getArchiveSize(), progressbar);
+	ret = FAT_Write(filepath, buffer, getArchiveSize(), progressbar);
 	if (ret < 0)
 		printf("Failed to save! (%d)\n", ret);
 
 install:
 	puts("Installing...");
-	ret = InstallTheme(download.ptr, getArchiveSize());
-	free(download.ptr);
+	ret = InstallTheme(buffer, getArchiveSize());
+	free(buffer);
 	return ret;
 }

@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
 	int ret;
 	char* file = NULL;
 	unsigned char* buffer = NULL;
-	size_t filesize = 0;
+	size_t size = 0;
 
 	int restore = 0;
 
@@ -102,7 +102,9 @@ int main(int argc, char* argv[]) {
 		clear();
 
 		if (!file) {
-			perror("SelectFileMenu failed");
+			if (errno != ECANCELED)
+				perror("SelectFileMenu failed");
+
 			goto error;
 		}
 
@@ -116,13 +118,25 @@ int main(int argc, char* argv[]) {
 	}
 
 install:
-	ret = FAT_Read(file, &buffer, &filesize, progressbar);
-	if (ret < 0) {
-		printf("failed! (%d)\n", ret);
+	size = FAT_GetFileSize(file);
+	if (!size) {
+		perror("FAT_GetFileSize failed");
 		goto error;
 	}
 
-	InstallTheme(buffer, filesize);
+	buffer = memalign(0x20, size);
+	if (!buffer) {
+		printf("No memory..? (failed to allocate %zu bytes)\n", size);
+		goto error;
+	}
+
+	ret = FAT_Read(file, buffer, size, progressbar);
+	if (ret < 0) {
+		perror("FAT_Read failed");
+		goto error;
+	}
+
+	InstallTheme(buffer, size);
 
 error:
 	free(buffer);
