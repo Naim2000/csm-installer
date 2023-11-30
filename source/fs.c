@@ -23,33 +23,38 @@ int progressbar(size_t read, size_t total) {
 	return 0;
 }
 
-int NAND_GetFileSize(const char* filepath) {
+int NAND_GetFileSize(const char* filepath, size_t* size) {
 	[[gnu::aligned(0x20)]] fstats file_stats;
 
+	if (size)
+		*size = 0;
+
 	int fd = ISFS_Open(filepath, 0);
-	if (fd > 0)
+	if (fd < 0)
 		return fd;
 
-	int ret = ISFS_GetFileStats(fd, &file_stats);
-	if (ret > 0)
-		return ret;
-
+	if (size) {
+		int ret = ISFS_GetFileStats(fd, &file_stats);
+		if (ret < 0)
+			return ret;
+		*size = file_stats.file_length;
+	}
 	ISFS_Close(fd);
-	return (int)file_stats.file_length;
+	return 0;
 }
 
-size_t FAT_GetFileSize(const char* filepath) {
+int FAT_GetFileSize(const char* filepath, size_t* size) {
 	FILE* fp = fopen(filepath, "rb");
 	if (!fp)
-		return 0;
+		return -errno;
 
-	fseek(fp, 0, SEEK_END);
-	size_t len = ftell(fp);
+	if (size) {
+		fseek(fp, 0, SEEK_END);
+		*size = ftell(fp);
+	}
+
 	fclose(fp);
-	if (!len)
-		errno = ENODATA;
-
-	return len;
+	return 0;
 }
 
 int NAND_Read(const char* filepath, void* buffer, size_t filesize, RWCallback callback) {

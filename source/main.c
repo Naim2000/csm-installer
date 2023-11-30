@@ -29,7 +29,6 @@ int main(int argc, char* argv[]) {
 	char* file = NULL;
 	unsigned char* buffer = NULL;
 	size_t size = 0;
-
 	int restore = 0;
 
 	__exception_setreload(15);
@@ -60,28 +59,27 @@ int main(int argc, char* argv[]) {
 		"	\x1b[30;1m(timing untested with real Wii Remote)\x1b[39m");
 
 	if (patchIOS(false) < 0) {
-		puts("failed to apply IOS patches...");
-		goto error;
+		puts("failed to apply IOS patches! Exiting in 5s...");
+		sleep(5);
+		return 0xD8000064;
 	}
-
-	if (!fatInitDefault()) {
-		puts("Unable to mount a storage device...");
-		goto error;
-	}
-
-	ISFS_Initialize();
 
 	initpads();
+
+	ISFS_Initialize();
 
 	if (sysmenu_process() < 0)
 		goto error;
 
 	sleep(2);
 	scanpads();
-	if (buttons_down(WPAD_BUTTON_PLUS))
-		restore++;
 
-	if (restore) {
+	if (!mountSD() && !mountUSB()) {
+		puts("Unable to mount a storage device...");
+		goto error;
+	}
+
+	if (restore || buttons_down(WPAD_BUTTON_PLUS)) {
 		ret = InstallOriginalTheme();
 		goto error;
 	}
@@ -110,7 +108,7 @@ int main(int argc, char* argv[]) {
 
 		printf("Installing theme %s. Is this OK?\n"
 				"Press +/START to confirm.\n"
-				"Press any other button to cancel.\n", file);
+				"Press any other button to cancel.\n\n", file);
 
 		wait_button(0);
 		if (buttons_down(WPAD_BUTTON_PLUS))
@@ -118,8 +116,8 @@ int main(int argc, char* argv[]) {
 	}
 
 install:
-	size = FAT_GetFileSize(file);
-	if (!size) {
+	printf("%s\n", file);
+	if (FAT_GetFileSize(file, &size) < 0) {
 		perror("FAT_GetFileSize failed");
 		goto error;
 	}

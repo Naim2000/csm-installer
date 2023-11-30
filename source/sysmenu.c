@@ -15,9 +15,9 @@
 
 void* memalign(size_t, size_t);
 
+static const char u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
 static const aeskey vwii_ckey = { 0x30, 0xbf, 0xc7, 0x6e, 0x7c, 0x19, 0xaf, 0xbb, 0x23, 0x16, 0x33, 0x30, 0xce, 0xd7, 0xc2, 0x8d };
 static const aeskey wii_ckey  = { 0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7 };
-
 
 static u64 __smNUSTID = 0x0000000100000002LL;
 static aeskey __smTitleKey = {};
@@ -112,7 +112,7 @@ int sysmenu_process() {
 
 	ret = ES_GetStoredTMDSize(0x100000002LL, &size);
 	if (ret < 0) {
-		printf("ES_GetStoredTMDSize failed (%d)\n", ret);
+		printf("ES_GetStoredTMDSize failed (%i)\n", ret);
 		goto finish;
 	}
 
@@ -125,7 +125,7 @@ int sysmenu_process() {
 
 	ret = ES_GetStoredTMD(0x100000002LL, buffer, size);
 	if (ret < 0) {
-		printf("ES_GetTMDView failed (%d)\n", ret);
+		printf("ES_GetTMDView failed (%i)\n", ret);
 		goto finish;
 	}
 
@@ -164,25 +164,21 @@ int sysmenu_process() {
 		if (content->index == sysmenu_tmd->boot_index) { // how Priiloader installer does it
 			sprintf(strrchr(sysmenu_filepath, '/'), "/%08x.app", content->cid);
 			*(strrchr(sysmenu_filepath, '/') + 1) = '1'; // Also how Priiloader installer does it. sort of
-			ret = ISFS_Open(sysmenu_filepath, 0);
-			if (ret > 0) ISFS_Close(ret);
+			ret = NAND_GetFileSize(sysmenu_filepath, NULL);
 
-			__hasPriiloader = ret > 0 || ret == -102;
+			__hasPriiloader = (ret <= 0);
 		}
 		else {
-			[[gnu::aligned(0x20)]] u32 header = 0;
+			char header[4] ATTRIBUTE_ALIGN(0x20) = {};
 
 			sprintf(strrchr(sysmenu_filepath, '/'), "/%08x.app", content->cid);
-			ret = ISFS_Open(sysmenu_filepath, ISFS_OPEN_READ);
+			ret = NAND_Read(sysmenu_filepath, header, 4, NULL);
 			if (ret < 0) {
-				printf("Failed to open %s (%d)\n", sysmenu_filepath, ret);
+				printf("Failed to read %s (%i)\n", sysmenu_filepath, ret);
 				continue;
 			}
 
-			ISFS_Read(ret, &header, sizeof(header));
-			ISFS_Close(ret);
-
-			if (header == 0x55AA382D) {
+			if (memcmp(header, u8_header, sizeof(u8_header)) == 0) {
 				__archiveCid = content->cid;
 				__archiveSize = (size_t)content->size;
 				strcpy(__archivePath, sysmenu_filepath);
@@ -198,21 +194,20 @@ int sysmenu_process() {
 		goto finish;
 	}
 
-	free(buffer);
-	buffer = memalign(0x20, STD_SIGNED_TIK_SIZE);
-	if (!buffer) {
-		printf("Failed to allocate space for ticket...?\n");
-		ret = -ENOMEM;
-		goto finish;
+	if (size < STD_SIGNED_TIK_SIZE) {
+		free(buffer);
+		buffer = memalign(0x20, STD_SIGNED_TIK_SIZE);
+		if (!buffer) {
+			printf("Failed to allocate space for ticket...?\n");
+			ret = -ENOMEM;
+			goto finish;
+		}
 	}
-
-	ret = ISFS_Open("/ticket/00000001/00000002.tik", ISFS_OPEN_READ);
+	ret = NAND_Read("/ticket/00000001/00000002.tik", buffer, STD_SIGNED_TIK_SIZE, NULL);
 	if (ret < 0) {
-		printf("Failed to open system menu ticket (%d)\n", ret);
+		printf("Failed to read system menu ticket (%i)\n", ret);
 		goto finish;
 	}
-	ISFS_Read(ret, buffer, STD_SIGNED_TIK_SIZE);
-	ISFS_Close(ret);
 
 	tik* sysmenu_tik = SIGNATURE_PAYLOAD((signed_blob*) buffer);
 
@@ -221,26 +216,22 @@ int sysmenu_process() {
 	memcpy(iv, &sysmenu_tik->titleid, sizeof(u64));
 	switch (sysmenu_tik->reserved[0xb]) {
 		case 0:
-		//	puts("this is a Wii (common key index is 0)");
 			mbedtls_aes_setkey_dec(&tkey, wii_ckey, sizeof(aeskey) * 8);
 			break;
 		case 2:
 			__smNUSTID |= 0x6LL << 32;
-		//	printf("new NUS title id: %016llx\n", __smNUSTID);
-		//	puts("this is a vWii (common key index is 2)");
 			mbedtls_aes_setkey_dec(&tkey, vwii_ckey, sizeof(aeskey) * 8);
 			break;
 
 		default:
 			printf("Unknown common key index?\n");
+			ret = -EINVAL;
 			goto finish;
 	}
 	mbedtls_aes_crypt_cbc(&tkey, MBEDTLS_AES_DECRYPT, sizeof(aeskey), iv, sysmenu_tik->cipher_title_key, __smTitleKey);
 
 finish:
 	free(buffer);
-//	printf("Press HOME to continue.\n");
-//	wait_button(WPAD_BUTTON_HOME);
 	return ret;
 }
 

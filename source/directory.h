@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <gctypes.h>
 
-#define MAX_ENTRIES 25
+#define MAX_ENTRIES 20
 
 typedef bool (*FileFilter)(const char* name);
 

@@ -17,8 +17,9 @@
 
 static const char
 	wiithemer_sig[] = "wiithemer",
-	binary_path_search[] = "C:\\Revolution\\ipl\\",
-	binary_path_fmt[] = "System%c_%c\\ipl\\bin\\RVL\\Final_%c";
+	binary_path_search[] = "C:\\Revolution\\ipl\\System",
+	binary_path_search_2[] = "D:\\Compat_irdrepo\\ipl\\Compat",
+	binary_path_fmt[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c";
 
 static int FindString(void* buf, size_t size, const char* str) {
 	int len = strlen(str);
@@ -46,7 +47,12 @@ version_t GetThemeVersion(unsigned char* buffer, size_t length) {
 	char rgn = 0, major = 0, minor = 0;
 
 	int off = FindString(buffer, length, binary_path_search);
-	if (off < 0) return (version_t){ '?', '?', '?' };
+
+	if (off < 0)
+		off = FindString(buffer, length, binary_path_search_2);
+
+	if (off < 0)
+		return (version_t){ '?', '?', '?' };
 
 	buffer += off + strlen(binary_path_search);
 	sscanf((char*)buffer, binary_path_fmt, &major, &minor, &rgn);
@@ -159,7 +165,7 @@ int InstallOriginalTheme() {
 	puts("Saving...");
 	ret = FAT_Write(filepath, buffer, getArchiveSize(), progressbar);
 	if (ret < 0)
-		printf("Failed to save! (%d)\n", ret);
+		perror("Failed to save");
 
 install:
 	puts("Installing...");

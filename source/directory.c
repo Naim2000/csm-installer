@@ -144,10 +144,16 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 		max--;
 
 	getcwd(cwd, sizeof(cwd));
-	sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
-	if (!GetDirectoryEntries(cwd, &entries, &cnt, filter)) {
-		*strrchr(cwd, '/') = '\x00';
-		*(strrchr(cwd, '/') + 1) = '\x00';
+
+	if (defaultFolder) {
+		sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
+		if (!GetDirectoryEntries(cwd, &entries, &cnt, filter)) {
+			*strrchr(cwd, '/') = '\x00';
+			*(strrchr(cwd, '/') + 1) = '\x00';
+			GetDirectoryEntries(cwd, &entries, &cnt, filter);
+		}
+	}
+	else {
 		GetDirectoryEntries(cwd, &entries, &cnt, filter);
 	}
 
@@ -217,6 +223,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 			else if (buttons & (WPAD_BUTTON_B | WPAD_BUTTON_LEFT)) {
 				if (strchr(cwd, '/') == strrchr(cwd, '/')) { // sd:/ <-- first and last /
 					errno = ECANCELED;
+					free(entries);
 					return NULL;
 				}
 				else {
@@ -231,8 +238,8 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 			}
 			else if (buttons & WPAD_BUTTON_HOME) {
 				errno = ECANCELED;
+				free(entries);
 				return NULL;
-				break;
 			}
 		}
 	}
