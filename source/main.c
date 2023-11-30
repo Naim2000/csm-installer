@@ -100,9 +100,7 @@ int main(int argc, char* argv[]) {
 		clear();
 
 		if (!file) {
-			if (errno != ECANCELED)
-				perror("SelectFileMenu failed");
-
+			perror("SelectFileMenu failed");
 			goto error;
 		}
 

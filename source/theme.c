@@ -46,15 +46,17 @@ SignatureLevel SignedTheme(unsigned char* buffer, size_t length) {
 version_t GetThemeVersion(unsigned char* buffer, size_t length) {
 	char rgn = 0, major = 0, minor = 0;
 
+	int len = strlen(binary_path_search);
 	int off = FindString(buffer, length, binary_path_search);
 
-	if (off < 0)
+	if (off < 0) {
+		len = strlen(binary_path_search_2);
 		off = FindString(buffer, length, binary_path_search_2);
-
+	}
 	if (off < 0)
 		return (version_t){ '?', '?', '?' };
 
-	buffer += off + strlen(binary_path_search);
+	buffer += off + len;
 	sscanf((char*)buffer, binary_path_fmt, &major, &minor, &rgn);
 	return (version_t) { major, minor, rgn };
 }
