@@ -15,6 +15,8 @@
 #include "fs.h"
 #include "network.h"
 
+void* memalign(size_t, size_t);
+
 static const char
 	wiithemer_sig[] = "wiithemer",
 	binary_path_search[] = "C:\\Revolution\\ipl\\System",
