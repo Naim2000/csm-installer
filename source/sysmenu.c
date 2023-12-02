@@ -166,7 +166,7 @@ int sysmenu_process() {
 			*(strrchr(sysmenu_filepath, '/') + 1) = '1'; // Also how Priiloader installer does it. sort of
 			ret = NAND_GetFileSize(sysmenu_filepath, NULL);
 
-			__hasPriiloader = (ret <= 0);
+			__hasPriiloader = (ret >= 0);
 		}
 		else {
 			char header[4] ATTRIBUTE_ALIGN(0x20) = {};

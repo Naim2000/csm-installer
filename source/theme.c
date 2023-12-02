@@ -23,11 +23,11 @@ static const char
 	binary_path_search_2[] = "D:\\Compat_irdrepo\\ipl\\Compat",
 	binary_path_fmt[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c";
 
-static int FindString(void* buf, size_t size, const char* str) {
+static int FindString(void* buf, size_t size, const char* str, bool end) {
 	int len = strlen(str);
 	for (int i = 0; i < (size - len); i++)
 		if (memcmp(buf + i, str, len) == 0)
-			return i;
+			return i + (end? strlen(str) : 0);
 
 	return -1;
 }
@@ -38,7 +38,7 @@ SignatureLevel SignedTheme(unsigned char* buffer, size_t length) {
 
 	if (memcmp(hash, getArchiveHash(), sizeof(sha1)) == 0)
 		return default_theme;
-	else if (FindString(buffer, length, wiithemer_sig) >= 0)
+	else if (FindString(buffer, length, wiithemer_sig, false) >= 0)
 		return wiithemer_signed;
 
 
@@ -48,17 +48,15 @@ SignatureLevel SignedTheme(unsigned char* buffer, size_t length) {
 version_t GetThemeVersion(unsigned char* buffer, size_t length) {
 	char rgn = 0, major = 0, minor = 0;
 
-	int len = strlen(binary_path_search);
-	int off = FindString(buffer, length, binary_path_search);
+	int off = FindString(buffer, length, binary_path_search, true);
 
-	if (off < 0) {
-		len = strlen(binary_path_search_2);
-		off = FindString(buffer, length, binary_path_search_2);
-	}
+	if (off < 0)
+		off = FindString(buffer, length, binary_path_search_2, true);
+
 	if (off < 0)
 		return (version_t){ '?', '?', '?' };
 
-	buffer += off + len;
+	buffer += off;
 	sscanf((char*)buffer, binary_path_fmt, &major, &minor, &rgn);
 	return (version_t) { major, minor, rgn };
 }
@@ -75,6 +73,16 @@ int InstallTheme(unsigned char* buffer, size_t size) {
 		return -EINVAL;
 	}
 
+	version_t themeversion = GetThemeVersion(buffer, size);
+	if (themeversion.region != getSmRegion()) {
+		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme region : %c\nSystem region: %c\n", themeversion.region, getSmRegion());
+		return -EINVAL;
+	}
+	else if (themeversion.major != getSmVersionMajor()) {
+		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme version : %c.X\nSystem menu version: %c.X\n", themeversion.major, getSmVersionMajor());
+		return -EINVAL;
+	}
+
 	switch (SignedTheme(buffer, size)) {
 		case default_theme:
 			puts("\x1b[32;1mThis is the default theme for your Wii menu.\x1b[39m");
@@ -85,20 +93,13 @@ int InstallTheme(unsigned char* buffer, size_t size) {
 
 		default:
 			puts("\x1b[30;1mThis theme isn't signed...\x1b[39m");
+		//	if (!hasPriiloader()) {
+		//		puts("Priiloader is not installed, not installing this theme.");
+		//		return -EPERM;
+		//	}
 			break;
 	}
 
-	putchar('\n');
-
-	version_t themeversion = GetThemeVersion(buffer, size);
-	if (themeversion.region != getSmRegion()) {
-		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme region : %c\nSystem region: %c\n", themeversion.region, getSmRegion());
-		return -EINVAL;
-	}
-	else if (themeversion.major != getSmVersionMajor()) {
-		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme major version : %c\nSystem major version: %c\n", themeversion.major, getSmVersionMajor());
-		return -EINVAL;
-	}
 
 	printf("%s\n", getArchivePath());
 	int ret = NAND_Write(getArchivePath(), buffer, size, progressbar);

@@ -23,10 +23,19 @@ struct entry {
 
 static char cwd[PATH_MAX];
 
-bool isDirectory(const char* path) {
+static bool isDirectory(const char* path) {
 	struct stat statbuf;
 	stat(path, &statbuf);
 	return S_ISDIR(statbuf.st_mode) > 0;
+}
+
+static bool goBack(char* path) {
+	if(strchr(path, '/') == strrchr(path, '/'))
+		return false;
+
+	*strrchr(path, '/') = '\x00';
+	*(strrchr(path, '/') + 1) = '\x00';
+	return true;
 }
 
 static void PrintEntries(struct entry entries[], int count, int max, int selected) {
@@ -148,8 +157,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 	if (defaultFolder) {
 		sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
 		if (!GetDirectoryEntries(cwd, &entries, &cnt, filter)) {
-			*strrchr(cwd, '/') = '\x00';
-			*(strrchr(cwd, '/') + 1) = '\x00';
+			goBack(cwd);
 			GetDirectoryEntries(cwd, &entries, &cnt, filter);
 		}
 	}
@@ -198,13 +206,12 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 			}
 			else if (buttons & (WPAD_BUTTON_A | WPAD_BUTTON_RIGHT)) {
 				if (entry->flags & 0x80) {
-					*strrchr(cwd, '/') = '\x00';
-					*(strrchr(cwd, '/') + 1) = '\x00';
+					goBack(cwd);
 					GetDirectoryEntries(cwd, &entries, &cnt, filter);
 					index = 0;
 					break;
 				}
-				if (entry->flags & 0x01) {
+				else if (entry->flags & 0x01) {
 				//	chdir(entry->name);
 					sprintf(strrchr(cwd, '/'), "/%s", entry->name);
 					GetDirectoryEntries(cwd, &entries, &cnt, filter);
@@ -221,20 +228,15 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 				break;
 			}
 			else if (buttons & (WPAD_BUTTON_B | WPAD_BUTTON_LEFT)) {
-				if (strchr(cwd, '/') == strrchr(cwd, '/')) { // sd:/ <-- first and last /
+				if (!goBack(cwd)) {
 					errno = ECANCELED;
 					free(entries);
 					return NULL;
 				}
-				else {
-					// "sd:/apps/cdbackup/". one strrchr('/') will land me right at the end. but so will another. so i will subtract one.
-					// i'm not sure why i typed that.
-					*strrchr(cwd, '/') = '\x00';
-					*(strrchr(cwd, '/') + 1) = '\x00';
-					GetDirectoryEntries(cwd, &entries, &cnt, filter);
-					index = 0;
-					break;
-				}
+
+				GetDirectoryEntries(cwd, &entries, &cnt, filter);
+				index = 0;
+				break;
 			}
 			else if (buttons & WPAD_BUTTON_HOME) {
 				errno = ECANCELED;

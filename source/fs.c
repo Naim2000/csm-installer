@@ -10,12 +10,9 @@
 
 int progressbar(size_t read, size_t total) {
 	printf("\r[");
-	for (size_t i = 0; i < total; i += FS_CHUNK) {
-		if (i < read)
-			putchar('=');
-		else
-			putchar(' ');
-	}
+	for (size_t i = 0; i < total; i += FS_CHUNK)
+		putchar((i < read) ? '=' : ' ');
+
 	printf("] %u / %u bytes (%.2f%%) ", read, total, (read / (double)total) * 100);
 	if (read == total)
 		putchar('\n');

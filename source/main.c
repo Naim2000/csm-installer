@@ -61,7 +61,7 @@ int main(int argc, char* argv[]) {
 	if (patchIOS(false) < 0) {
 		puts("failed to apply IOS patches! Exiting in 5s...");
 		sleep(5);
-		return 0xD8000064;
+		return 0xCD800064;
 	}
 
 	initpads();
