@@ -176,7 +176,6 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 	if (!GetDirectoryEntries(cwd, &entries, &cnt, filter))
 		GetDirectoryEntries(goBack(cwd), &entries, &cnt, filter);
 
-
 	for(;;) {
 		if (!entries) {
 			if (errno != ECANCELED)

@@ -14,7 +14,7 @@
 #include "fatMounter.h"
 #include "directory.h"
 #include "sysmenu.h"
-#include "theme.h"
+#include "wad.h"
 #include "network.h"
 
 __weak_symbol
@@ -29,36 +29,10 @@ bool isCSMfile(const char* name) {
 int main(int argc, char* argv[]) {
 	int ret;
 	char* file = NULL;
-	void* buffer = NULL;
-	size_t size = 0;
-	int restore = 0;
 
 	__exception_setreload(15);
 
-	if (argc) {
-		for (int i = 0; i < argc; i++) {
-			char* arg = argv[i];
-
-			if (arg[0] != '-' && arg[0] != '/')
-				continue;
-
-			switch(arg[1]) {
-				case 'i':
-					file = (arg[2] == ':' || arg[2] == '=')?
-						arg + 3 :
-						argv[++i];
-					break;
-				case 'r':
-					restore++;
-					break;
-			}
-		}
-	}
-
-	puts(
-		"Loading...\n"
-		"Hold + to restore original theme!"
-		"	\x1b[30;1m(timing untested with real Wii Remote)\x1b[39m");
+	puts("Loading...\n");
 
 	if (patchIOS(false) < 0) {
 		puts("failed to apply IOS patches! Exiting in 5s...");
@@ -81,11 +55,6 @@ int main(int argc, char* argv[]) {
 		goto error;
 	}
 
-	if (restore || buttons_down(WPAD_BUTTON_PLUS)) {
-		ret = InstallOriginalTheme();
-		goto error;
-	}
-
 	if (!hasPriiloader()) {
 		printf("\x1b[30;1mPlease install Priiloader...\x1b[39m\n\n");
 		sleep(1);
@@ -94,62 +63,68 @@ int main(int argc, char* argv[]) {
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	if (file)
-		goto install;
-
 	for (;;) {
-		file = SelectFileMenu("Select a .csm or .app file.", "themes", isCSMfile);
+		file = SelectFileMenu("Select a .wad file.", "WAD", isWADFile);
 		clear();
 
 		if (!file) {
 			perror("SelectFileMenu failed");
-			goto error;
+			break;
 		}
 
-		printf("\n%s\n\n", file);
-
-		if (FAT_GetFileSize(file, &size) < 0) {
-			perror("FAT_GetFileSize failed");
-			sleep(2);
+		printf("%s\n", file);
+		wad_t* wad = wadInit(file);
+		if (!wad) {
+			puts("wadInit() failed");
+			wait_button(0);
 			continue;
 		}
 
-		printf("File size: %.2fMB\n\n", size / 1048576.0f);
+		fseek(wad->fp, 0, SEEK_END);
+		size_t fsize = ftell(wad->fp);
+		rewind(wad->fp);
 
-		printf("Press +/START to install.\n"
-				"Press any other button to cancel.\n\n");
+		printf("\nFile size: 0x%x (%u)\n\n", fsize, fsize);
+
+		printf(
+			"Title ID : %016llx\n"
+			"Revision : %hu\n"
+			"IOS ver  : 0x%x (IOS%i)\n\n", wad->titleID, wad->titleVer, wad->titleIOS, wad->titleIOS);
+
+		printf(
+			"Certificates size: 0x%x (%u)\n"
+			"CRL size: 0x%x (%u)\n"
+			"Ticket size: 0x%x (%u)\n"
+			"TMD size: 0x%x (%u)\n\n", wad->header.certsSize,  wad->header.certsSize,
+			wad->header.crlSize, wad->header.crlSize,
+			wad->header.tikSize, wad->header.tikSize,
+			wad->header.tmdSize, wad->header.tmdSize);
+
+		printf("Contents count: %hu\n\n", wad->contentsCount);
+
+		printf(
+			"Press +/START to continue.\n"
+			"Press any other button to cancel.\n\n"
+		);
 
 		wait_button(0);
-		if (buttons_down(WPAD_BUTTON_PLUS))
-			break;
+		if (!buttons_down(WPAD_BUTTON_PLUS)) {
+			wadFree(wad);
+			continue;
+		}
 
-		size = 0;
+		ret = wadInstall(wad);
+		if (ret < 0)
+			printf("wadInstall() failed (%i)\n%s\n", ret, wad_strerror(ret));
+		else
+			printf("\x1b[32mDone!\x1b[39m\n");
+
+		wadFree(wad);
+		puts("Press any button to continue.");
+		wait_button(0);
 	}
-
-install:
-
-	if (FAT_GetFileSize(file, &size) < 0) {
-		perror("FAT_GetFileSize failed");
-		goto error;
-	}
-
-	buffer = memalign32(size);
-	if (!buffer) {
-		printf("No memory..? (failed to allocate %u bytes)\n", size);
-		goto error;
-	}
-
-	ret = FAT_Read(file, buffer, size, progressbar);
-	if (ret < 0) {
-		perror("FAT_Read failed");
-		goto error;
-	}
-
-	InstallTheme(buffer, size);
 
 error:
-	free(buffer);
-	network_deinit();
 	ISFS_Deinitialize();
 	unmountSD();
 	unmountUSB();
