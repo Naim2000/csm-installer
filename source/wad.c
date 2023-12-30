@@ -24,29 +24,29 @@ const char* wad_strerror(int ret) {
 		case -106:	return "(FS) No such file or directory.";
 		case -1005: return "Invalid public key type in certificate.";
 		case -1009: return "(ES) Short read.";
-		case -1010: return "Short write. Consider freeing up space in Data Management.";
+		case -1010: return "(ES) Short write. Consider freeing up space in Data Management.";
 		case -1012: return "Invalid signature type.";
 		case -1016: return "Maximum amount of handles exceeded (3). Who is reopening /dev/es anyways?";
 		case -1017: return "(ES) Invalid arguments. ES might not like what you're trying to do.";
 		case -1020: return "This ticket is for a specific Wii, and it's not this one.";
-		case -1022: return "Hash mismatch. If uninstalling first does not fix this, this WAD is corrupt.";
+		case -1022: return "Hash mismatch.\nIf uninstalling first does not fix this, this WAD is corrupt.";
 		case -1024: return "ES is out of memory (!?)";
 		case -1026: return "Incorrect access rights (according to the TMD.)";
 		case -1027: return "Issuer not found in the certificate chain.";
-		case -1028: return "Ticket not present.";
-		case -1029: return "Invalid ticket. ES does not like titles using the vWii common key.\nUninstalling the title first might fix this.";
+		case -1028: return "Ticket not installed.";
+		case -1029: return "Invalid ticket. This ticket probably uses the vWii common key.\nUninstalling the title first might fix this.";
 		case -1031: return "Installed boot2 version is too old (or you are trying to downgrade it.)";
 		case -1032: return "Fatal error in early ES initialization (!?)";
 		case -1033: return "A ticket limit was exceeded. Play time is over, sorry.";
 		case -1035: return "A newer version of this title is already present.\nConsider uninstalling it first.";
 		case -1036: return "Required IOS for this title is not present.";
 		case -1037: return "Installed number of contents doesn't match TMD.";
-		case -1039: return "(DI) \"TMD not supplied for disc/nand game\"";
+	//	case -1039: return "(DI) \"TMD not supplied for disc/nand game\"";
 
 		case -2011: return "(IOSC) Signature check failed. Lol!! No trucha bug!!";
 		case -2016: return "(IOSC) Unaligned data.";
 
-		case ES_EINVAL: return "(libogc) Invalid arguments. Only practical reason for this\nis an incorrect TMD/ticket size in the WAD header. This WAD is broken.";
+		case ES_EINVAL: return "(libogc) Invalid arguments. Only practical reason for this is an\nincorrect TMD/ticket size in the WAD header. This WAD is broken.";
 		case ES_EALIGN: return "(libogc) Unaligned pointer.";
 		case ES_ENOTINIT: return "(libogc) ES is not initialized (it is initialized on start..?)";
 
@@ -63,21 +63,26 @@ static bool sanityCheckHeader(struct wadHeader header) {
 }
 
 wad_t* wadInit(const char* filepath) {
-	size_t res;
 	struct wadHeader header = {};
 	size_t certsOffset, crlOffset, tikOffset, tmdOffset, contentsStart;
 	signed_blob* s_tmd = NULL;
 	signed_blob* s_tik = NULL;
 
 	FILE* fp = fopen(filepath, "rb");
-	if (!fp)
+	if (!fp) {
+		perror("Failed to open WAD file");
 		return NULL;
+	}
 
-	if (!fread(&header, sizeof(header), 1, fp))
+	if (!fread(&header, sizeof(header), 1, fp)) {
+		perror("Failed to read WAD header");
 		return NULL;
+	}
 
-	if (!sanityCheckHeader(header))
+	if (!sanityCheckHeader(header)) {
+		puts("Bad WAD header.");
 		return NULL;
+	}
 
 	certsOffset = roundup64(sizeof(struct wadHeader));
 
@@ -94,38 +99,35 @@ wad_t* wadInit(const char* filepath) {
 	contentsStart = roundup64(tmdOffset + header.tmdSize);
 
 	s_tmd = memalign(0x20, header.tmdSize);
-	if (!s_tmd)
-		return NULL;
+	if (!s_tmd) {
+		puts("Memory allocation for TMD failed.");
+		goto fail;
+	}
 
 	fseek(fp, tmdOffset, SEEK_SET);
-	res = fread(s_tmd, 1, header.tmdSize, fp);
-	if (res < header.tmdSize) {
-		free(s_tmd);
-		return NULL;
+	if (!fread(s_tmd, header.tmdSize, 1, fp)) {
+		perror("Failed to read TMD");
+		goto fail;
 	}
-	rewind(fp);
 
 	tmd* p_tmd = SIGNATURE_PAYLOAD(s_tmd);
 
-	s_tik = memalign(0x20, STD_SIGNED_TIK_SIZE);
-	if (!s_tik) {
-		free(s_tmd);
-		return NULL;
+	s_tik = memalign(0x20, header.tikSize);
+	if (!s_tmd) {
+		puts("Memory allocation for ticket failed.");
+		goto fail;
 	}
 
 	fseek(fp, tikOffset, SEEK_SET);
-	res = fread(s_tik, 1, STD_SIGNED_TIK_SIZE, fp);
-	if (res < STD_SIGNED_TIK_SIZE) {
-		free(s_tmd);
-		free(s_tik);
-		return NULL;
+	if (!fread(s_tik, header.tikSize, 1, fp)) {
+		perror("Failed to read ticket");
+		goto fail;
 	}
-	rewind(fp);
 
 	tik* p_tik = SIGNATURE_PAYLOAD(s_tik);
 
 	if (p_tik->reserved[0xb] != 0x00)
-		printf("	WARNING: common key index 0x%02x is not 0 (!?)\n", p_tik->reserved[0xb]);
+		printf("WARNING: common key index 0x%02x is not 0 (!?)\n", p_tik->reserved[0xb]);
 
 	mbedtls_aes_context aes = {};
 	aeskey tkey = {};
@@ -136,9 +138,8 @@ wad_t* wadInit(const char* filepath) {
 
 	wad_t* wad = memalign(0x20, sizeof(wad_t) + (p_tmd->num_contents * sizeof(struct wadContent)));
 	if (!wad) {
-		free(s_tmd);
-		free(s_tik);
-		return NULL;
+		puts("Memory allocation for wad structure failed.");
+		goto fail;
 	}
 
 	wad->header = header;
@@ -157,7 +158,7 @@ wad_t* wadInit(const char* filepath) {
 		wContent->content = p_tmd->contents[i];
 		wContent->offset = (i == 0) ?
 			contentsStart :
-			wContent[i - 2].offset + roundup64(wContent[i - 2].content.size);
+			wContent[-1].offset + roundup64(wContent[-1].content.size);
 		// wContent->offset = (i? wContent[i - 1].offset : contentsStart) + roundup64(i? wContent[i - 1].content.size : 0);
 	}
 
@@ -169,6 +170,11 @@ wad_t* wadInit(const char* filepath) {
 	free(s_tmd);
 	free(s_tik);
 	return wad;
+
+fail:
+	free(s_tmd);
+	free(s_tik);
+	return NULL;
 }
 
 int wadInstall(wad_t* wad) {
@@ -207,16 +213,21 @@ int wadInstall(wad_t* wad) {
 		fread(s_certs, 1, wad->header.crlSize, wad->fp);
 	}
 
-	size_t s_tmd_size = sizeof(sig_rsa2048) + sizeof(tmd) + (sizeof(tmd_content) * wad->contentsCount);
-	size_t s_tik_size = STD_SIGNED_TIK_SIZE;
-
-	ret = ES_AddTicket(s_tik, s_tik_size, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
-	if (ret < 0)
+	printf(">   Installing ticket... ");
+	ret = ES_AddTicket(s_tik, wad->header.tikSize, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
+	if (ret < 0) {
+		printf("failed! (%i)\n", ret);
 		goto finish;
+	}
+	puts("OK!");
 
-	ret = ES_AddTitleStart(s_tmd, s_tmd_size, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
-	if (ret < 0)
+	printf(">   Starting title installation... ");
+	ret = ES_AddTitleStart(s_tmd, wad->header.tmdSize, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
+	if (ret < 0) {
+		printf("failed! (%i)\n", ret);
 		goto finish;
+	}
+	puts("OK!");
 
 	free(s_certs);
 	free(s_crl);
@@ -232,6 +243,7 @@ int wadInstall(wad_t* wad) {
 		tmd_content* content = &wContent->content;
 		size_t e_csize = roundup16(content->size);
 
+		printf(">>  Installing content #%02i... (offset=0x%x, size=%u) ", i, wContent->offset, e_csize);
 		int cfd = ret = ES_AddContentStart(wad->titleID, content->cid);
 		if (ret < 0)
 			break;
@@ -251,16 +263,29 @@ int wadInstall(wad_t* wad) {
 			e_csize -= _read;
 		}
 
-		ret = ES_AddContentFinish(cfd);
-		if (ret < 0)
-			break;
+		if (ret >= 0)
+			ret = ES_AddContentFinish(cfd);
+
+		if (ret < 0) {
+			printf("failed! (%i)\n", ret);
+			goto finish;
+		}
+
+		puts("OK!");
 	}
 
-	if (!ret)
+	if (!ret) {
+		printf(">   Finishing title installation... ");
 		ret = ES_AddTitleFinish();
+	}
 
-	if (ret < 0)
+	if (ret < 0) {
+		printf("failed! (%i)\n", ret);
 		ES_AddTitleCancel();
+	}
+	else {
+		puts("OK!");
+	}
 
 finish:
 	free(s_certs);
