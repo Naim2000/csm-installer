@@ -213,16 +213,25 @@ int wadInstall(wad_t* wad) {
 		fread(s_certs, 1, wad->header.crlSize, wad->fp);
 	}
 
+	size_t s_tmd_size = sizeof(sig_rsa2048) + sizeof(tmd) + (sizeof(tmd_content) * wad->contentsCount);
+	size_t s_tik_size = sizeof(sig_rsa2048) + sizeof(tik);
+
+	if (wad->header.tikSize != s_tik_size)
+		printf("WARNING: Ticket size stated in header is incorrect! (%i != %i)\n", wad->header.tikSize, s_tik_size);
+
 	printf(">   Installing ticket... ");
-	ret = ES_AddTicket(s_tik, wad->header.tikSize, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
+	ret = ES_AddTicket(s_tik, s_tik_size, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
 	if (ret < 0) {
 		printf("failed! (%i)\n", ret);
 		goto finish;
 	}
 	puts("OK!");
 
+	if (wad->header.tmdSize != s_tmd_size)
+		printf("WARNING: TMD size stated in header is incorrect! (%i != %i)\n", wad->header.tmdSize, s_tmd_size);
+
 	printf(">   Starting title installation... ");
-	ret = ES_AddTitleStart(s_tmd, wad->header.tmdSize, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
+	ret = ES_AddTitleStart(s_tmd, s_tmd_size, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
 	if (ret < 0) {
 		printf("failed! (%i)\n", ret);
 		goto finish;
@@ -243,7 +252,7 @@ int wadInstall(wad_t* wad) {
 		tmd_content* content = &wContent->content;
 		size_t e_csize = roundup16(content->size);
 
-		printf(">>  Installing content #%02i... (offset=0x%x, size=%u) ", i, wContent->offset, e_csize);
+		printf(">>    Installing content #%02i... ", i);
 		int cfd = ret = ES_AddContentStart(wad->titleID, content->cid);
 		if (ret < 0)
 			break;

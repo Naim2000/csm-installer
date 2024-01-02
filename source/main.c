@@ -84,13 +84,13 @@ int main(int argc, char* argv[]) {
 		size_t fsize = ftell(wad->fp);
 		rewind(wad->fp);
 
-		printf("\nFile size: 0x%x (%u)\n\n", fsize, fsize);
+		printf("\nFile size: %.2fMB (0x%x)\n\n", fsize / 1048576.0f , fsize);
 
 		printf(
 			"Title ID : %016llx\n"
-			"Revision : %hu\n"
-			"IOS ver  : 0x%x (IOS%i)\n\n", wad->titleID, wad->titleVer, wad->titleIOS, wad->titleIOS);
-
+			"Revision : %hu (%04hx)\n"
+			"IOS ver  : IOS%i\n\n", wad->titleID, wad->titleVer, wad->titleVer, wad->titleIOS);
+/*
 		printf(
 			"Certificates size: 0x%x (%u)\n"
 			"CRL size: 0x%x (%u)\n"
@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
 			wad->header.tmdSize, wad->header.tmdSize);
 
 		printf("Contents count: %hu\n\n", wad->contentsCount);
-
+*/
 		printf(
 			"Press +/START to continue.\n"
 			"Press any other button to cancel.\n\n"
