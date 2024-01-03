@@ -29,27 +29,26 @@ static bool isDirectory(const char* path) {
 	return S_ISDIR(statbuf.st_mode) > 0;
 }
 
-static bool goBack(char* path) {
+static char* goBack(char* path) {
 	if(strchr(path, '/') == strrchr(path, '/'))
-		return false;
+		return 0;
 
 	*strrchr(path, '/') = '\x00';
 	*(strrchr(path, '/') + 1) = '\x00';
-	return true;
+	return path;
 }
 
-static void PrintEntries(struct entry entries[], int count, int max, int selected) {
+static void PrintEntries(struct entry entries[], int start, int count, int max, int selected) {
 	if (!count) {
 		printf("\t\x1b[30;1m[Nothing.]\x1b[39m");
 		return;
 	}
 
-	int i = 0;
-	if (selected > (max - 4)) i += (selected - (max - 4));
-	for (int j = 0; i < count && j < max; j++) {
-		if (i == selected) printf(">>");
-		printf("\t%s\n", entries[i++].name);
-	}
+	for (int i = 0; i < MIN(max, count); i++)
+		printf("%s	%s\n",
+			   (start + i) == selected? ">>" : "",
+			   entries[start + i].name);
+
 }
 
 static int GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
@@ -143,83 +142,100 @@ static struct entry* GetDirectoryEntries(const char* path, struct entry** entrie
 	return *entries;
 }
 
+static const char* FileSelectAction(u8 flags) {
+	if (flags & 0x01)	return "Enter";
+	if (flags & 0x80)	return "Go back";
+
+	return "Install";
+}
+
 char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter filter) {
 	struct entry* entries = NULL;
-	int index = 0;
-	int cnt = 0, max = MAX_ENTRIES;
+	int cnt = 0, start = 0, index = 0, max = 0;
+	int conX = 0, conY = 0;
 	static char filename[PATH_MAX];
+	static char line[0x80];
 
-	if (header)
-		max--;
+	CON_GetMetrics(&conX, &conY);
+	memset(line, '=', conX);
+	line[conX] = 0;
+	max = conY - 6; // 3 lines for the top and 3 lines for the bottom
 
 	getcwd(cwd, sizeof(cwd));
 
-	if (defaultFolder) {
-		sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
-		if (!GetDirectoryEntries(cwd, &entries, &cnt, filter)) {
-			goBack(cwd);
-			GetDirectoryEntries(cwd, &entries, &cnt, filter);
-		}
-	}
+	if (!defaultFolder) GetDirectoryEntries(cwd, &entries, &cnt, filter);
 	else {
-		GetDirectoryEntries(cwd, &entries, &cnt, filter);
+		sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
+		if (!GetDirectoryEntries(cwd, &entries, &cnt, filter))
+			GetDirectoryEntries(goBack(cwd), &entries, &cnt, filter);
 	}
 
 	for(;;) {
 		if (!entries) {
-			perror("GetDirectoryEntries failed");
+			if (errno != ECANCELED)
+				perror("GetDirectoryEntries failed");
+
 			return NULL;
 		}
-
 		clear();
-		if (header)
-			printf("%s\n", header);
 
 		struct entry* entry = entries + index;
-		printf("Current directory: [%s]\n\n", cwd);
-		PrintEntries(entries, cnt, max, index);
-		printf("\x1b[23;0H"
+
+		printf("\n%s\nCurrent directory: [%s] - showing %i-%i out of %i total\n%s",
+			header ? header : "", cwd, start + 1, start + MIN(max, cnt - start), cnt, line);
+
+		PrintEntries(entries, start, cnt, max, index);
+		printf("\x1b[%i;0H%s"
 		//	"Controls:\n"
-			"	A/RIGHT: %-7s		UP/DOWN   : Select\n"
-			"	B/LEFT : %-7s		HOME/START: Exit\n",
-			entry->flags & 0x01 ? "Enter" :
-				(entry->flags & 0x80 ? "Go Back" : "\x1b[32;1mInstall\x1b[39m"), // mighty stupid
+			"	A/Right\x10 : %-34s Up\x1e/Down\x1f : Select\n"
+			"	B/\x11Left  : %-34s Home/Start: Exit",
+			conY - 2, line,
+			FileSelectAction(entry->flags),
 			(strchr(cwd, '/') == strrchr(cwd, '/')) ? "Exit" : "Go back"
 		);
 
 		for(;;) {
 			scanpads();
-			u32 buttons = buttons_down();
+			u32 buttons = buttons_down(0);
 			if (buttons & WPAD_BUTTON_DOWN) {
-				if (index < (cnt - 1))
-					index += 1;
-				else
-					index = 0;
+				if (index >= (cnt - 1)) {
+					start = index = 0;
+					break;
+				}
+
+				if ((++index - start) >= max)
+					start++;
+
 				break;
 			}
 			else if (buttons & WPAD_BUTTON_UP) {
-				if (index > 0)
-					index -= 1;
-				else
+				if (index <= 0) {
 					index = cnt - 1;
+					if (index >= max)
+						start = 1 + index - max;
+
+					break;
+				}
+
+				if (--index < start)
+					start--;
+
 				break;
 			}
 			else if (buttons & (WPAD_BUTTON_A | WPAD_BUTTON_RIGHT)) {
 				if (entry->flags & 0x80) {
 					goBack(cwd);
 					GetDirectoryEntries(cwd, &entries, &cnt, filter);
-					index = 0;
+					index = start = 0;
 					break;
 				}
 				else if (entry->flags & 0x01) {
-				//	chdir(entry->name);
 					sprintf(strrchr(cwd, '/'), "/%s", entry->name);
 					GetDirectoryEntries(cwd, &entries, &cnt, filter);
-					index = 0;
+					index = start = 0;
 					break;
 				}
 				else {
-				//	if (filename[sprintf(filename, "%s", pwd()) - 1] != '/') strcat(filename, "/");
 					strcpy(filename, cwd);
 					strcat(filename, entry->name);
 					free(entries);
@@ -235,7 +251,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 				}
 
 				GetDirectoryEntries(cwd, &entries, &cnt, filter);
-				index = 0;
+				index = start = 0;
 				break;
 			}
 			else if (buttons & WPAD_BUTTON_HOME) {

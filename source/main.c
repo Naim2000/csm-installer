@@ -18,7 +18,7 @@
 void __exception_setreload(int);
 void* memalign(size_t, size_t);
 unsigned int sleep(unsigned int);
-[[gnu::weak]] void OSReport(const char* fmt, ...) {};
+[[gnu::weak]] void OSReport(const char* fmt, ...) {}
 
 bool isCSMfile(const char* name) {
 	return(fileext(name) && (strequal(fileext(name), "app") || strequal(fileext(name), "csm")));
@@ -104,18 +104,31 @@ int main(int argc, char* argv[]) {
 			goto error;
 		}
 
-		printf("Installing theme %s. Is this OK?\n"
-				"Press +/START to confirm.\n"
-				"Press any other button to cancel.\n\n", file);
+		printf("\n%s\n\n", file);
+
+		if (FAT_GetFileSize(file, &size) < 0) {
+			perror("FAT_GetFileSize failed");
+			sleep(2);
+			continue;
+		}
+
+		printf(
+			"File size: %.2fMB\n\n", size / 1048576.0f);
+
+
+		printf("Press +/START to install.\n"
+				"Press any other button to cancel.\n\n");
 
 		wait_button(0);
 		if (buttons_down(WPAD_BUTTON_PLUS))
 			break;
+
+		size = 0;
 	}
 
 install:
-	printf("%s\n", file);
-	if (FAT_GetFileSize(file, &size) < 0) {
+
+	if (!size && FAT_GetFileSize(file, &size) < 0) {
 		perror("FAT_GetFileSize failed");
 		goto error;
 	}

@@ -2,5 +2,5 @@
 
 void initpads();
 void scanpads();
-void wait_button(); // /-- why do these work?
-u32 buttons_down(); // \--
+void wait_button(u32);
+u32 buttons_down(u32);

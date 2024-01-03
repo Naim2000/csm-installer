@@ -1,3 +1,4 @@
+#include <gccore.h>
 #include <gctypes.h>
 #include <wiiuse/wpad.h>
 #include <ogc/pad.h>
