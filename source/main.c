@@ -68,7 +68,9 @@ int main(int argc, char* argv[]) {
 		clear();
 
 		if (!file) {
-			perror("SelectFileMenu failed");
+			if (errno != ECANCELED)
+				perror("SelectFileMenu failed");
+
 			break;
 		}
 

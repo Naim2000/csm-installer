@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <sys/param.h>
 #include <mbedtls/aes.h>
+#include <mbedtls/sha1.h>
 
 #include "wad.h"
 
@@ -14,12 +15,17 @@
 
 extern void* memalign(size_t, size_t);
 
-static const aeskey wii_ckey  = { 0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7 };
+static const aeskey CommonKeys[] = {
+/* Standard common key */	{ 0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7 },
+/*  Korean common key  */	{ 0x63, 0xb8, 0x2b, 0xb4, 0xf4, 0x61, 0x4e, 0x2e, 0x13, 0xf2, 0xfe, 0xfb, 0xba, 0x4c, 0x9b, 0x7e },
+/*   vWii common key   */	{ 0x30, 0xbf, 0xc7, 0x6e, 0x7c, 0x19, 0xaf, 0xbb, 0x23, 0x16, 0x33, 0x30, 0xce, 0xd7, 0xc2, 0x8d },
+};
 
 const char* wad_strerror(int ret) {
 	switch (ret) {
-		case -EIO: return "Short read/write (probably read.)";
-		case -ENOMEM: return "Out of memory (!?)";
+		case -EPERM:	return "No perms lol";
+		case -EIO:		return "Short read/write (probably read.)";
+		case -ENOMEM:	return "Out of memory (!?)";
 
 		case -106:	return "(FS) No such file or directory.";
 		case -1005: return "Invalid public key type in certificate.";
@@ -112,6 +118,9 @@ wad_t* wadInit(const char* filepath) {
 
 	tmd* p_tmd = SIGNATURE_PAYLOAD(s_tmd);
 
+	if (p_tmd->vwii_title)
+		puts("WARNING: TMD reports that this is a vWii title");
+
 	s_tik = memalign(0x20, header.tikSize);
 	if (!s_tmd) {
 		puts("Memory allocation for ticket failed.");
@@ -126,14 +135,20 @@ wad_t* wadInit(const char* filepath) {
 
 	tik* p_tik = SIGNATURE_PAYLOAD(s_tik);
 
-	if (p_tik->reserved[0xb] != 0x00)
-		printf("WARNING: common key index 0x%02x is not 0 (!?)\n", p_tik->reserved[0xb]);
+	uint8_t ckey_index = p_tik->reserved[0xb];
+	if (ckey_index == 0x02) {
+		puts("WARNING: ticket uses the vWii common key. Requires fakesigning.");
+	}
+	else if (ckey_index > 0x02) {
+		printf("Invalid common key index. (%hhu > 2)\n", ckey_index);
+		goto fail;
+	}
 
 	mbedtls_aes_context aes = {};
 	aeskey tkey = {};
 	int64_t iv[2] = { p_tik->titleid, 0 };
 
-	mbedtls_aes_setkey_dec(&aes, wii_ckey, sizeof(aeskey) * 8);
+	mbedtls_aes_setkey_dec(&aes, CommonKeys[ckey_index], sizeof(aeskey) * 8);
 	mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, sizeof(aeskey), (unsigned char*)iv, p_tik->cipher_title_key, tkey);
 
 	wad_t* wad = memalign(0x20, sizeof(wad_t) + (p_tmd->num_contents * sizeof(struct wadContent)));
@@ -177,6 +192,44 @@ fail:
 	return NULL;
 }
 
+static inline void void_signature(signed_blob* blob) { memset(SIGNATURE_SIG(blob), 0x00, SIGNATURE_SIZE(blob) - 0x4); }
+
+static bool Fakesign(signed_blob* s_tmd, signed_blob* s_tik) {
+	sha1 hash = {};
+
+	if (s_tmd) {
+		void_signature(s_tmd);
+		tmd* p_tmd = SIGNATURE_PAYLOAD(s_tmd);
+		uint16_t v = 0;
+		do {
+			p_tmd->fill3 = v++;
+			mbedtls_sha1_ret(p_tmd, TMD_SIZE(p_tmd), hash);
+			if (hash[0] = 0x00)
+				break;
+		} while (v);
+
+		if (v)
+			return false;
+	}
+
+	if (s_tik) {
+		void_signature(s_tik);
+		tik* p_tik = SIGNATURE_PAYLOAD(s_tik);
+		uint16_t v = 0;
+		do {
+			p_tik->padding = v++;
+			mbedtls_sha1_ret(p_tik, sizeof(tik), hash);
+			if (hash[0] = 0x00)
+				break;
+		} while (v);
+
+		if (v)
+			return false;
+	}
+
+	return true;
+}
+
 int wadInstall(wad_t* wad) {
 	int ret;
 
@@ -189,10 +242,8 @@ int wadInstall(wad_t* wad) {
 	s_tik = memalign(0x20, wad->header.tikSize);
 	s_tmd = memalign(0x20, wad->header.tmdSize);
 	if (!s_certs || !s_tik || !s_tmd) {
-		free(s_certs);
-		free(s_tik);
-		free(s_tmd);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto finish;
 	}
 
 	fseek(wad->fp, wad->certsOffset, SEEK_SET);
@@ -206,18 +257,48 @@ int wadInstall(wad_t* wad) {
 
 	if (wad->header.crlSize) {
 		s_crl = memalign(0x20, wad->header.crlSize);
-		if (!s_crl)
-			return -ENOMEM;
+		if (!s_crl) {
+			ret = -ENOMEM;
+			goto finish;
+		}
 
 		fseek(wad->fp, wad->crlOffset, SEEK_SET);
 		fread(s_certs, 1, wad->header.crlSize, wad->fp);
+	}
+
+	tmd* p_tmd = SIGNATURE_PAYLOAD(s_tmd);
+	tik* p_tik = SIGNATURE_PAYLOAD(s_tik);
+
+	if (p_tmd->vwii_title) {
+		puts("TMD reports that this is a vWii title, let's change that.");
+		p_tmd->vwii_title = 0x00;
+		if (!Fakesign(s_tmd, 0)) {
+			puts("Failed to fakesign TMD!");
+			ret = -EPERM;
+			goto finish;
+		}
+	}
+
+	if (p_tik->reserved[0xb] == 0x02) {
+		puts("This ticket uses the vWii common key, let's change that.");
+		mbedtls_aes_context aes = {};
+		int64_t iv[2] = { p_tik->titleid, 0 };
+
+		p_tik->reserved[0xb] = 0x00;
+		mbedtls_aes_setkey_enc(&aes, CommonKeys[0], sizeof(aeskey) * 8);
+		mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, sizeof(aeskey), (unsigned char*)iv, wad->titleKey, p_tik->cipher_title_key);
+		if (!Fakesign(0, s_tik)) {
+			puts("Failed to fakesign ticket!");
+			ret = -EPERM;
+			goto finish;
+		}
 	}
 
 	size_t s_tmd_size = sizeof(sig_rsa2048) + sizeof(tmd) + (sizeof(tmd_content) * wad->contentsCount);
 	size_t s_tik_size = sizeof(sig_rsa2048) + sizeof(tik);
 
 	if (wad->header.tikSize != s_tik_size)
-		printf("WARNING: Ticket size stated in header is incorrect! (%i != %i)\n", wad->header.tikSize, s_tik_size);
+		printf("\x1b[1;33mWARNING: Ticket size stated in header is incorrect! (%u != %u)\x1b[39m\n", wad->header.tikSize, s_tik_size);
 
 	printf(">   Installing ticket... ");
 	ret = ES_AddTicket(s_tik, s_tik_size, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
@@ -228,7 +309,7 @@ int wadInstall(wad_t* wad) {
 	puts("OK!");
 
 	if (wad->header.tmdSize != s_tmd_size)
-		printf("WARNING: TMD size stated in header is incorrect! (%i != %i)\n", wad->header.tmdSize, s_tmd_size);
+		printf("WARNING: TMD size stated in header is incorrect! (%u != %u)\n", wad->header.tmdSize, s_tmd_size);
 
 	printf(">   Starting title installation... ");
 	ret = ES_AddTitleStart(s_tmd, s_tmd_size, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
