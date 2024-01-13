@@ -6,7 +6,8 @@
 #include <ogc/ipc.h>
 #include <runtimeiospatch.h>
 
-static const char* devDolphin [[gnu::aligned(0x20)]] = "/dev/dolphin";
+__attribute__((aligned(0x20)))
+static const char* devDolphin = "/dev/dolphin";
 static int dolphin_fd = ~0;
 
 bool isDolphin() {

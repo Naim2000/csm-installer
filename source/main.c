@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <errno.h>
 #include <gccore.h>
 #include <ogc/es.h>
@@ -7,6 +8,7 @@
 
 #include "video.h"
 #include "iospatch.h"
+#include "malloc.h"
 #include "pad.h"
 #include "fs.h"
 #include "fatMounter.h"
@@ -15,13 +17,13 @@
 #include "theme.h"
 #include "network.h"
 
-void __exception_setreload(int);
-void* memalign(size_t, size_t);
-unsigned int sleep(unsigned int);
-[[gnu::weak]] void OSReport(const char* fmt, ...) {}
+__attribute__((weak))
+void OSReport(const char* fmt, ...) {}
+
+extern void __exception_setreload(int);
 
 bool isCSMfile(const char* name) {
-	return(fileext(name) && (strequal(fileext(name), "app") || strequal(fileext(name), "csm")));
+	return hasFileExtension(name, "csm") || hasFileExtension(name, "app");
 }
 
 int main(int argc, char* argv[]) {
@@ -128,14 +130,14 @@ int main(int argc, char* argv[]) {
 
 install:
 
-	if (!size && FAT_GetFileSize(file, &size) < 0) {
+	if (FAT_GetFileSize(file, &size) < 0) {
 		perror("FAT_GetFileSize failed");
 		goto error;
 	}
 
-	buffer = memalign(0x20, size);
+	buffer = memalign32(size);
 	if (!buffer) {
-		printf("No memory..? (failed to allocate %zu bytes)\n", size);
+		printf("No memory..? (failed to allocate %u bytes)\n", size);
 		goto error;
 	}
 
@@ -153,7 +155,7 @@ error:
 	ISFS_Deinitialize();
 	unmountSD();
 	unmountUSB();
-	puts("\nPress HOME to exit.");
+	puts("Press HOME to exit.");
 	wait_button(WPAD_BUTTON_HOME);
 	WPAD_Shutdown();
 	return 0;

@@ -11,7 +11,7 @@ typedef enum {
 	default_theme,
 } SignatureLevel;
 
-SignatureLevel SignedTheme(unsigned char* buffer, size_t length);
-int InstallTheme(unsigned char* buffer, size_t length);
+SignatureLevel SignedTheme(const void* buffer, size_t length);
+int InstallTheme(const void* buffer, size_t length);
 int InstallOriginalTheme();
-version_t GetThemeVersion(unsigned char* buffer, size_t length);
+version_t GetThemeVersion(const void* buffer, size_t length);

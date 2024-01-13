@@ -1,17 +1,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <gctypes.h>
+#include <ogc/es.h>
 #include <ogc/ipc.h>
 #include <ogc/isfs.h>
 
 int sysmenu_process();
 bool hasPriiloader();
-u64 getSmNUSTitleID();
-u8* getSmTitleKey();
-u32 getArchiveCid();
+uint64_t getSmNUSTitleID();
+const uint8_t* getSmTitleKey();
+uint32_t getArchiveCid();
 size_t getArchiveSize();
-const char* getArchivePath();
-u8* getArchiveHash();
-u16 getSmVersion();
+bool isArchive(sha1);
+uint16_t getSmVersion();
 char getSmVersionMajor();
 char getSmRegion();

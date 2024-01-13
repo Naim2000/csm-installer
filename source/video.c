@@ -1,5 +1,3 @@
-#include "video.h"
-
 #include <gctypes.h>
 #include <ogc/system.h>
 #include <ogc/cache.h>
@@ -10,7 +8,8 @@
 #include <ogc/gx_struct.h>
 #include <ogc/consol.h>
 
-void* memalign(size_t, size_t);
+#include "video.h"
+#include "malloc.h"
 
 static void* xfb = NULL;
 static GXRModeObj vmode = {};
@@ -24,7 +23,7 @@ void init_video() {
 	vmode.viWidth = 672;
 
 	// set correct middlepoint of the screen
-    if (vmode.viTVMode == VI_TVMODE_PAL_INT || vmode.viTVMode == VI_TVMODE_PAL_PROG) {
+    if (vmode.viTVMode & (VI_PAL << 2)) {
 		vmode.viXOrigin = (VI_MAX_WIDTH_PAL - vmode.viWidth) / 2;
 		vmode.viYOrigin = (VI_MAX_HEIGHT_PAL - vmode.viHeight) / 2;
 	}
@@ -34,7 +33,7 @@ void init_video() {
 	}
 
 	size_t fbSize = VIDEO_GetFrameBufferSize(&vmode) + 0x100;
-	xfb = memalign(0x20, fbSize);
+	xfb = memalign32(fbSize);
 	DCInvalidateRange(xfb, fbSize);
 	xfb = MEM_K0_TO_K1(xfb);
 

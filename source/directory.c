@@ -31,11 +31,18 @@ static bool isDirectory(const char* path) {
 
 static char* goBack(char* path) {
 	if(strchr(path, '/') == strrchr(path, '/'))
-		return 0;
+		return NULL;
 
 	*strrchr(path, '/') = '\x00';
 	*(strrchr(path, '/') + 1) = '\x00';
 	return path;
+}
+
+bool hasFileExtension(const char* name, const char* ext) {
+	if (!(name = strrchr(name, '.')))
+		return false;
+
+	return strcasecmp(name + 1, ext) == 0;
 }
 
 static void PrintEntries(struct entry entries[], int start, int count, int max, int selected) {
@@ -59,7 +66,7 @@ static int GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
 		return 0;
 
 	while ( (pent = readdir(pdir)) != NULL ) {
-		if (strequal(pent->d_name, ".") || strequal(pent->d_name, ".."))
+		if (!strcmp(pent->d_name, ".") || !strcmp(pent->d_name, ".."))
 			continue;
 
 		strcat(cwd, pent->d_name);
@@ -84,7 +91,7 @@ static int ReadDirectory(DIR* pdir, struct entry entries[], int count, FileFilte
 		if (!pent)
 			break;
 
-		if (strequal(pent->d_name, ".") || strequal(pent->d_name, ".."))
+		if (!strcmp(pent->d_name, ".") || !strcmp(pent->d_name, ".."))
 			continue;
 
 		strcat(cwd, pent->d_name);
@@ -163,12 +170,12 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 
 	getcwd(cwd, sizeof(cwd));
 
-	if (!defaultFolder) GetDirectoryEntries(cwd, &entries, &cnt, filter);
-	else {
+	if (defaultFolder)
 		sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
-		if (!GetDirectoryEntries(cwd, &entries, &cnt, filter))
-			GetDirectoryEntries(goBack(cwd), &entries, &cnt, filter);
-	}
+
+	if (!GetDirectoryEntries(cwd, &entries, &cnt, filter))
+		GetDirectoryEntries(goBack(cwd), &entries, &cnt, filter);
+
 
 	for(;;) {
 		if (!entries) {
@@ -262,5 +269,3 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 		}
 	}
 }
-
-

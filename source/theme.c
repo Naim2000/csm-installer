@@ -11,75 +11,70 @@
 #include <mbedtls/sha1.h>
 #include <mbedtls/aes.h>
 
+#include "malloc.h"
 #include "sysmenu.h"
 #include "fs.h"
 #include "network.h"
-
-void* memalign(size_t, size_t);
 
 static const char
 	wiithemer_sig[] = "wiithemer",
 	binary_path_search[] = "C:\\Revolution\\ipl\\System",
 	binary_path_search_2[] = "D:\\Compat_irdrepo\\ipl\\Compat",
-	binary_path_fmt[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c";
+	binary_path_fmt[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c",
+	u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
 
-static int FindString(void* buf, size_t size, const char* str, bool end) {
-	int len = strlen(str);
-	for (int i = 0; i < (size - len); i++)
-		if (memcmp(buf + i, str, len) == 0)
-			return i + (end? strlen(str) : 0);
+// ?
+extern void* memmem(const void* haystack, size_t haystack_len, const void* needle, size_t needle_len);
 
-	return -1;
-}
-
-SignatureLevel SignedTheme(unsigned char* buffer, size_t length) {
+SignatureLevel SignedTheme(const void* buffer, size_t length) {
 	sha1 hash = {};
 	mbedtls_sha1_ret(buffer, length, hash);
 
-	if (memcmp(hash, getArchiveHash(), sizeof(sha1)) == 0)
+	if (isArchive(hash))
 		return default_theme;
-	else if (FindString(buffer, length, wiithemer_sig, false) >= 0)
+	else if (memmem(buffer, length, wiithemer_sig, strlen(wiithemer_sig)))
 		return wiithemer_signed;
 
-
-	return unknown;
+	else
+		return unknown;
 }
 
-version_t GetThemeVersion(unsigned char* buffer, size_t length) {
+version_t GetThemeVersion(const void* buffer, size_t length) {
 	char rgn = 0, major = 0, minor = 0;
+	char* ptr;
 
-	int off = FindString(buffer, length, binary_path_search, true);
+	ptr = memmem(buffer, length, binary_path_search, strlen(binary_path_search));
+	if (ptr) ptr += strlen(binary_path_search);
+	else {
+		ptr = memmem(buffer, length, binary_path_search_2, strlen(binary_path_search_2));
+		if (ptr) ptr += strlen(binary_path_search_2);
+	}
 
-	if (off < 0)
-		off = FindString(buffer, length, binary_path_search_2, true);
+	if (!ptr)
+		return (version_t) { '?', '?', '?' };
 
-	if (off < 0)
-		return (version_t){ '?', '?', '?' };
-
-	buffer += off;
-	sscanf((char*)buffer, binary_path_fmt, &major, &minor, &rgn);
+	sscanf(ptr, binary_path_fmt, &major, &minor, &rgn);
 	return (version_t) { major, minor, rgn };
 }
 
-int InstallTheme(unsigned char* buffer, size_t size) {
-	if (*(u16*)buffer == ('P' << 8 | 'K')) {
+int InstallTheme(const void* buffer, size_t size) {
+	if (memcmp(buffer, "PK", 2) == 0) {
 		puts("\x1b[31;1mPlease do not rename .mym files.\x1b[39m\n"
 			"Follow https://wii.hacks.guide/themes to properly convert it."
 		);
 		return -EINVAL;
 	}
-	else if (*(u32*)buffer != 0x55AA382D) {
+	else if (memcmp(buffer, u8_header, sizeof(u8_header)) != 0) {
 		puts("\x1b[31;1mNot a theme!\x1b[39m");
 		return -EINVAL;
 	}
 
 	version_t themeversion = GetThemeVersion(buffer, size);
-	if (themeversion.region != getSmRegion()) {
-		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme region : %c\nSystem region: %c\n", themeversion.region, getSmRegion());
-		return -EINVAL;
-	}
-	else if (themeversion.major != getSmVersionMajor()) {
-		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\nTheme version : %c.X\nSystem menu version: %c.X\n", themeversion.major, getSmVersionMajor());
+	if (themeversion.region != getSmRegion() || themeversion.major != getSmVersionMajor()) {
+		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\n"
+			   "Theme version : %c.X%c\n"
+			   "System version: %c.X%c\n", themeversion.major, themeversion.region,
+										   getSmVersionMajor(), getSmRegion());
 		return -EINVAL;
 	}
 
@@ -93,16 +88,17 @@ int InstallTheme(unsigned char* buffer, size_t size) {
 
 		default:
 			puts("\x1b[30;1mThis theme isn't signed...\x1b[39m");
-		//	if (!hasPriiloader()) {
-		//		puts("Priiloader is not installed, not installing this theme.");
-		//		return -EPERM;
-		//	}
+			if (!hasPriiloader()) {
+				puts("Consider installing Priiloader before installing unsigned themes.");
+				return -EPERM;
+			}
 			break;
 	}
 
-
-	printf("%s\n", getArchivePath());
-	int ret = NAND_Write(getArchivePath(), buffer, size, progressbar);
+	char filepath[ISFS_MAXPATH] = {};
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
+	printf("%s\n", filepath);
+	int ret = NAND_Write(filepath, buffer, size, progressbar);
 	if (ret < 0) {
 		printf("error. (%d)\n", ret);
 		return ret;
@@ -114,41 +110,44 @@ int InstallTheme(unsigned char* buffer, size_t size) {
 int InstallOriginalTheme() {
 	int ret;
 	char url[0x80] = "http://nus.cdn.shop.wii.com/ccs/download/";
+	char filepath[ISFS_MAXPATH] = {};
+	size_t fsize = getArchiveSize();
 	blob download = {};
 	mbedtls_aes_context title = {};
 	aeskey iv = { 0x00, 0x01 };
-	char filepath[16];
 
 	puts("Installing original theme.");
 
-	void* buffer = memalign(0x20, getArchiveSize());
+	void* buffer = memalign32(fsize);
 	if (!buffer) {
-		printf("No memory...??? (failed to allocate %zu bytes)\n", getArchiveSize());
+		printf("No memory...??? (failed to allocate %u bytes)\n", fsize);
 		return -ENOMEM;
 	}
 
-
-	ret = NAND_Read(getArchivePath(), buffer, getArchiveSize(), NULL);
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
+	ret = NAND_Read(filepath, buffer, fsize, NULL);
 	if (ret >= 0) {
-		if (SignedTheme(buffer, getArchiveSize()) == 2) {
+		if (SignedTheme(buffer, fsize) == default_theme) {
 			puts("You still have the original theme.");
-			return 0;
+			goto finish;
 		}
 	}
 
 	sprintf(filepath, "%08x.app", getArchiveCid());
-	ret = FAT_Read(filepath, buffer, getArchiveSize(), NULL);
-	if (ret >= 0)
-		if (SignedTheme(buffer, getArchiveSize()) == 2)
+	ret = FAT_Read(filepath, buffer, fsize, NULL);
+	if (ret >= 0) {
+		if (SignedTheme(buffer, fsize) == default_theme)
 			goto install;
 
-	printf("Initializing network... ");
+		printf("\x1b[30;1m%s exists on your SD card but it's not for this system?\x1b[39m\n", filepath);
+	}
+
+	puts("Initializing network... ");
 	ret = network_init();
 	if (ret < 0) {
-		printf("failed! (%d)\n", ret);
-		return ret;
+		printf("Failed to intiailize network! (%d)\n", ret);
+		goto finish;
 	}
-	puts("ok.");
 
 	puts("Downloading...");
 	sprintf(strrchr(url, '/'), "/%016llx/%08x", getSmNUSTitleID(), getArchiveCid());
@@ -158,23 +157,29 @@ int InstallOriginalTheme() {
 			"Download failed! (%d)\n"
 			"Error details:\n"
 			"	%s\n", ret, GetLastDownloadError());
-		return ret;
+
+		goto finish;
 	}
 
 	puts("Decrypting...");
-	mbedtls_aes_setkey_dec(&title, getSmTitleKey(), sizeof(aeskey) * 8);
-	mbedtls_aes_crypt_cbc(&title, MBEDTLS_AES_DECRYPT, download.size, iv, download.ptr, download.ptr);
-	memcpy(buffer, download.ptr, getArchiveSize());
+	mbedtls_aes_setkey_dec(&title, getSmTitleKey(), 128);
+	mbedtls_aes_crypt_cbc(&title, MBEDTLS_AES_DECRYPT, download.size, iv, download.ptr, buffer);
 	free(download.ptr);
 
 	puts("Saving...");
-	ret = FAT_Write(filepath, buffer, getArchiveSize(), progressbar);
+	ret = FAT_Write(filepath, buffer, fsize, progressbar);
 	if (ret < 0)
 		perror("Failed to save");
 
 install:
 	puts("Installing...");
-	ret = InstallTheme(buffer, getArchiveSize());
+	if (SignedTheme(buffer, fsize) != default_theme) {
+		puts("...Something happened. Not installing this. (This isn't a brick though.)");
+		goto finish;
+	}
+	ret = InstallTheme(buffer, fsize);
+
+finish:
 	free(buffer);
 	return ret;
 }

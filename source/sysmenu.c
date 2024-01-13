@@ -12,23 +12,16 @@
 
 #include "pad.h"
 #include "fs.h"
-
-void* memalign(size_t, size_t);
+#include "crypto.h"
+#include "malloc.h"
 
 static const char u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
-static const aeskey vwii_ckey = { 0x30, 0xbf, 0xc7, 0x6e, 0x7c, 0x19, 0xaf, 0xbb, 0x23, 0x16, 0x33, 0x30, 0xce, 0xd7, 0xc2, 0x8d };
-static const aeskey wii_ckey  = { 0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7 };
 
-static u64 __smNUSTID = 0x0000000100000002LL;
-static aeskey __smTitleKey = {};
-static int __hasPriiloader = 0;
-static u32 __archiveCid = 0;
-static size_t __archiveSize = 0; // stupid
-static sha1 __archiveHash = {};
-static char __archivePath[ISFS_MAXPATH];
-static u16 __smVersion = 0;
-static s8  __smRegion  = 0;
-static s8  __smMajor   = 0;
+static aeskey sm_titleKey = {};
+static bool is_vWii = false;
+static bool priiloader = false;
+static tmd sm_tmd = {};
+static tmd_content sm_archive = {};
 
 /* from YAWM ModMii Edition
 const u16 VersionList[] = {
@@ -51,7 +44,10 @@ const u16 VersionList[] = {
 };
 */
 
-static char _getSMVersionMajor(u16 rev) {
+static char _getSMVersionMajor(uint16_t rev) {
+	if (!rev)
+		return 0;
+
 	switch (rev >> 4) {
 		case 0x02:
 		case 0x04:
@@ -86,7 +82,10 @@ static char _getSMVersionMajor(u16 rev) {
 	return 0;
 }
 
-static char _getSMRegion(u16 rev) {
+static char _getSMRegion(uint16_t rev) {
+	if (!rev)
+		return 0;
+
 	switch (rev & 0xf) {
 		case 0:
 			return 'J';
@@ -106,9 +105,9 @@ static char _getSMRegion(u16 rev) {
 
 int sysmenu_process() {
 	int ret;
-	u32 size = 0;
-	void* buffer = NULL;
-	char sysmenu_filepath[ISFS_MAXPATH] = "/title/00000001/00000002/content/";
+	uint32_t size = 0;
+	signed_blob* buffer = NULL;
+	char filepath[ISFS_MAXPATH] = "/title/00000001/00000002/content/";
 
 	ret = ES_GetStoredTMDSize(0x100000002LL, &size);
 	if (ret < 0) {
@@ -116,7 +115,7 @@ int sysmenu_process() {
 		goto finish;
 	}
 
-	buffer = memalign(0x20, size);
+	buffer = memalign32(MAX(size, STD_SIGNED_TIK_SIZE));
 	if (!buffer) {
 		printf("Failed to allocate space for TMD...?\n");
 		ret = -ENOMEM;
@@ -129,148 +128,86 @@ int sysmenu_process() {
 		goto finish;
 	}
 
-	tmd* sysmenu_tmd = SIGNATURE_PAYLOAD((signed_blob*)buffer);
+	tmd* p_tmd = SIGNATURE_PAYLOAD(buffer);
+	sm_tmd = *p_tmd;
 
-	__smVersion = sysmenu_tmd->title_version;
-//	printf("System menu version: %hu (%04hx)\n", __smVersion, __smVersion);
-	if (__smVersion > 0x2000) {
-		printf("Bad system menu version! (%hu/%04hx)\nInvalid or not vanilla.\n", __smVersion, __smVersion);
+	uint16_t rev = p_tmd->title_version;
+	if (rev > 0x2000) {
+		printf("Bad system menu version! (%hu/%04hx)\nInvalid or not vanilla.\n", rev, rev);
 		ret = -EINVAL;
 		goto finish;
 	}
 
-	__smRegion = _getSMRegion(__smVersion);
-//	printf("System menu region (from rev number): %c\n", __smRegion);
-	if (!__smRegion) {
-		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify region (what's the last hex digit?)\n", __smVersion, __smVersion);
+	if (!_getSMRegion(rev)) {
+		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify region (what are the last 4 bits?)\n", rev, rev);
 		ret = -EINVAL;
 		goto finish;
 	}
 
-	__smMajor = _getSMVersionMajor(__smVersion);
-//	printf("System menu major version (from rev number): %c\n", __smMajor);
-	if (!__smMajor) {
-		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify major revision.\n", __smVersion, __smVersion);
+	if (!_getSMVersionMajor(rev)) {
+		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify major revision.\n", rev, rev);
 		ret = -EINVAL;
 		goto finish;
 	}
 
-	for (int i = 0; i < sysmenu_tmd->num_contents; i++) {
-		tmd_content* content = sysmenu_tmd->contents + i;
-
-		if (content->type == 0x8001)
+	for (int i = 0; i < p_tmd->num_contents; i++) {
+		tmd_content* content = p_tmd->contents + i;
+		if (content->type & 0x8000)
 			continue;
 
-		if (content->index == sysmenu_tmd->boot_index) { // how Priiloader installer does it
-			sprintf(strrchr(sysmenu_filepath, '/'), "/%08x.app", content->cid);
-			*(strrchr(sysmenu_filepath, '/') + 1) = '1'; // Also how Priiloader installer does it. sort of
-			ret = NAND_GetFileSize(sysmenu_filepath, NULL);
+		sprintf(strrchr(filepath, '/'), "/%08x.app", content->cid);
 
-			__hasPriiloader = (ret >= 0);
+		if (content->index == p_tmd->boot_index) { // how Priiloader installer does it
+			*(strrchr(filepath, '/') + 1) = '1';
+			if(NAND_GetFileSize(filepath, NULL) >= 0)
+				priiloader = true;
 		}
 		else {
 			char header[4] ATTRIBUTE_ALIGN(0x20) = {};
-
-			sprintf(strrchr(sysmenu_filepath, '/'), "/%08x.app", content->cid);
-			ret = NAND_Read(sysmenu_filepath, header, 4, NULL);
+			ret = NAND_Read(filepath, header, 4, NULL);
 			if (ret < 0) {
-				printf("Failed to read %s (%i)\n", sysmenu_filepath, ret);
+				printf("Failed to read %s (%i)\n", filepath, ret);
 				continue;
 			}
 
-			if (memcmp(header, u8_header, sizeof(u8_header)) == 0) {
-				__archiveCid = content->cid;
-				__archiveSize = (size_t)content->size;
-				strcpy(__archivePath, sysmenu_filepath);
-				memcpy(__archiveHash, content->hash, sizeof(sha1));
-				continue;
-			}
+			if (memcmp(header, u8_header, sizeof(u8_header)) == 0)
+				sm_archive = *content;
 		}
 	}
 
-	if(!__archiveCid) {
+	if(!sm_archive.cid) {
 		printf("Failed to identify system menu archive!");
 		ret = -ENOENT;
 		goto finish;
 	}
 
-	if (size < STD_SIGNED_TIK_SIZE) {
-		free(buffer);
-		buffer = memalign(0x20, STD_SIGNED_TIK_SIZE);
-		if (!buffer) {
-			printf("Failed to allocate space for ticket...?\n");
-			ret = -ENOMEM;
-			goto finish;
-		}
-	}
 	ret = NAND_Read("/ticket/00000001/00000002.tik", buffer, STD_SIGNED_TIK_SIZE, NULL);
 	if (ret < 0) {
 		printf("Failed to read system menu ticket (%i)\n", ret);
 		goto finish;
 	}
 
-	tik* sysmenu_tik = SIGNATURE_PAYLOAD((signed_blob*) buffer);
+	tik* p_tik = SIGNATURE_PAYLOAD(buffer);
+	if (p_tik->reserved[0xb] == 0x02)
+		is_vWii = true;
 
-	aeskey iv = {};
-	mbedtls_aes_context tkey = {};
-	memcpy(iv, &sysmenu_tik->titleid, sizeof(u64));
-	switch (sysmenu_tik->reserved[0xb]) {
-		case 0:
-			mbedtls_aes_setkey_dec(&tkey, wii_ckey, sizeof(aeskey) * 8);
-			break;
-		case 2:
-			__smNUSTID |= 0x6LL << 32;
-			mbedtls_aes_setkey_dec(&tkey, vwii_ckey, sizeof(aeskey) * 8);
-			break;
-
-		default:
-			printf("Unknown common key index?\n");
-			ret = -EINVAL;
-			goto finish;
-	}
-	mbedtls_aes_crypt_cbc(&tkey, MBEDTLS_AES_DECRYPT, sizeof(aeskey), iv, sysmenu_tik->cipher_title_key, __smTitleKey);
+	GetTitleKey(p_tik, sm_titleKey);
 
 finish:
 	free(buffer);
 	return ret;
 }
 
-u64 getSmNUSTitleID() {
-	return __smNUSTID;
+uint64_t getSmNUSTitleID() {
+	return is_vWii? 0x0000000700000002LL:
+					0x0000000100000002LL;
 }
 
-bool hasPriiloader() {
-	return __hasPriiloader > 0;
-}
-
-u32 getArchiveCid() {
-	return __archiveCid;
-}
-
-size_t getArchiveSize() {
-	return __archiveSize;
-}
-
-const char* getArchivePath() {
-	return __archivePath;
-}
-
-u8* getSmTitleKey() {
-	return __smTitleKey;
-}
-
-u16 getSmVersion() {
-	return __smVersion;
-}
-
-u8* getArchiveHash() {
-	return __archiveHash;
-}
-
-char getSmRegion() {
-	return __smRegion;
-}
-
-char getSmVersionMajor() {
-	return __smMajor;
-}
+bool hasPriiloader() { return priiloader; }
+uint32_t getArchiveCid() { return sm_archive.cid; }
+size_t getArchiveSize() { return sm_archive.size; }
+const uint8_t* getSmTitleKey() { return sm_titleKey; }
+uint16_t getSmVersion() { return sm_tmd.title_version; }
+bool isArchive(sha1 hash) { return memcmp(sm_archive.hash, hash, sizeof(sha1)) == 0; }
+char getSmRegion() { return _getSMRegion(sm_tmd.title_version); }
+char getSmVersionMajor() { return _getSMVersionMajor(sm_tmd.title_version); }

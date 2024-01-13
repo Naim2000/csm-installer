@@ -13,7 +13,7 @@ int progressbar(size_t read, size_t total) {
 	for (size_t i = 0; i < total; i += FS_CHUNK)
 		putchar((i < read) ? '=' : ' ');
 
-	printf("] %u / %u bytes (%.2f%%) ", read, total, (read / (double)total) * 100);
+	printf("] %u / %u bytes (%.2f%%) ", read, total, (read / (float)total) * 100);
 	if (read == total)
 		putchar('\n');
 
@@ -21,7 +21,8 @@ int progressbar(size_t read, size_t total) {
 }
 
 int NAND_GetFileSize(const char* filepath, size_t* size) {
-	[[gnu::aligned(0x20)]] fstats file_stats;
+	__attribute__((aligned(0x20)))
+	fstats file_stats;
 
 	if (size)
 		*size = 0;
@@ -108,7 +109,7 @@ int FAT_Read(const char* filepath, void* buffer, size_t filesize, RWCallback cal
 		return -EIO;
 }
 
-int NAND_Write(const char* filepath, void* buffer, size_t filesize, RWCallback callback) {
+int NAND_Write(const char* filepath, const void* buffer, size_t filesize, RWCallback callback) {
 	int ret = ISFS_Open(filepath, ISFS_OPEN_WRITE);
 	if (ret < 0)
 		return ret;
@@ -133,7 +134,7 @@ int NAND_Write(const char* filepath, void* buffer, size_t filesize, RWCallback c
 		return -EIO;
 }
 
-int FAT_Write(const char* filepath, void* buffer, size_t filesize, RWCallback callback) {
+int FAT_Write(const char* filepath, const void* buffer, size_t filesize, RWCallback callback) {
 	FILE* fp = fopen(filepath, "wb");
 	if (!fp)
 		return -errno;
