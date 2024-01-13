@@ -164,7 +164,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 	static char line[0x80];
 
 	CON_GetMetrics(&conX, &conY);
-	memset(line, '=', conX);
+	memset(line, 0xc4, conX); // from d2x cIOS installer
 	line[conX] = 0;
 	max = conY - 6; // 3 lines for the top and 3 lines for the bottom
 
@@ -188,7 +188,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 
 		struct entry* entry = entries + index;
 
-		printf("\n%s\nCurrent directory: [%s] - showing %i-%i out of %i total\n%s",
+		printf("\n%s\nCurrent directory: [%s] - %i-%i of %i total\n%s",
 			header ? header : "", cwd, start + 1, start + MIN(max, cnt - start), cnt, line);
 
 		PrintEntries(entries, start, cnt, max, index);

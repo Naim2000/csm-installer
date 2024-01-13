@@ -17,7 +17,7 @@
 #include "theme.h"
 #include "network.h"
 
-__attribute__((weak))
+__weak_symbol
 void OSReport(const char* fmt, ...) {}
 
 extern void __exception_setreload(int);
@@ -29,17 +29,17 @@ bool isCSMfile(const char* name) {
 int main(int argc, char* argv[]) {
 	int ret;
 	char* file = NULL;
-	unsigned char* buffer = NULL;
+	void* buffer = NULL;
 	size_t size = 0;
 	int restore = 0;
 
 	__exception_setreload(15);
 
 	if (argc) {
-		for(int i = 0; i < argc; i++) {
+		for (int i = 0; i < argc; i++) {
 			char* arg = argv[i];
 
-			if (arg[0] != '-')
+			if (arg[0] != '-' && arg[0] != '/')
 				continue;
 
 			switch(arg[1]) {
@@ -114,9 +114,7 @@ int main(int argc, char* argv[]) {
 			continue;
 		}
 
-		printf(
-			"File size: %.2fMB\n\n", size / 1048576.0f);
-
+		printf("File size: %.2fMB\n\n", size / 1048576.0f);
 
 		printf("Press +/START to install.\n"
 				"Press any other button to cancel.\n\n");
