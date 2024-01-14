@@ -194,8 +194,8 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 		PrintEntries(entries, start, cnt, max, index);
 		printf("\x1b[%i;0H%s"
 		//	"Controls:\n"
-			"	A/Right\x10 : %-34s Up\x1e/Down\x1f : Select\n"
-			"	B/\x11Left  : %-34s Home/Start: Exit",
+			"	A/Right\x10 : %-35s Up\x1e/Down\x1f : Select\n"
+			"	B/\x11Left  : %-35s Home/Start: Exit",
 			conY - 2, line,
 			FileSelectAction(entry->flags),
 			(strchr(cwd, '/') == strrchr(cwd, '/')) ? "Exit" : "Go back"

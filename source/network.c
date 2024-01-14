@@ -38,12 +38,22 @@ static size_t WriteToBlob(void* buffer, size_t size, size_t nmemb, void* userp) 
 
 static int xferinfo_cb(void* userp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
 	xferinfo_data* data = userp;
+	if (!dltotal) {
+		printf("...\r");
+		return 0;
+	}
 
-	u64 now = gettime();
-	u32 elapsed = diff_msec(data->start, now);
+	if (!data->start)
+		data->start = gettime();
 
-	printf("\r%llu/%llu bytes // %.2f KB/s...",
-		   dlnow, dltotal, 		((double)dlnow / 0x400) / ((double)elapsed / 1000));
+	uint64_t now = gettime();
+	uint32_t elapsed = diff_sec(data->start, now);
+
+	double f_dlnow = (dlnow / 0x100000.p0);
+	double f_dltotal = (dltotal / 0x100000.p0);
+
+	printf("\r%.2f/%.2fMB // %.2f MB/s...    ",
+		   f_dlnow, f_dltotal, f_dlnow / elapsed);
 
 	return 0;
 }
@@ -72,7 +82,7 @@ void network_deinit() {
 int DownloadFile(char* url, blob* blob) {
 	CURL* curl;
 	CURLcode res;
-	xferinfo_data data;
+	xferinfo_data data = {};
 
 	curl = curl_easy_init();
 	if (!curl)
@@ -87,7 +97,6 @@ int DownloadFile(char* url, blob* blob) {
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToBlob);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, blob);
 	ebuffer[0] = '\x00';
-	data.start = gettime();
 	res = curl_easy_perform(curl);
 	putchar('\n');
 	curl_easy_cleanup(curl);

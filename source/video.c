@@ -1,4 +1,4 @@
-#include <gctypes.h>
+#include <stdio.h>
 #include <ogc/system.h>
 #include <ogc/cache.h>
 #include <ogc/video.h>
@@ -15,6 +15,7 @@ static void* xfb = NULL;
 static GXRModeObj vmode = {};
 
 // from LoadPriiloader
+__attribute__((constructor))
 void init_video() {
 	VIDEO_Init();
 
@@ -35,7 +36,7 @@ void init_video() {
 	size_t fbSize = VIDEO_GetFrameBufferSize(&vmode) + 0x100;
 	xfb = memalign32(fbSize);
 	DCInvalidateRange(xfb, fbSize);
-	xfb = MEM_K0_TO_K1(xfb);
+	xfb = (void*)((uintptr_t)xfb | SYS_BASE_UNCACHED);
 
 	VIDEO_SetBlack(true);
 	VIDEO_Configure(&vmode);
@@ -54,4 +55,10 @@ void init_video() {
 	VIDEO_WaitVSync();
 	if (vmode.viTVMode & VI_NON_INTERLACE)
 		VIDEO_WaitVSync();
+}
+
+void clear() {
+	VIDEO_WaitVSync();
+	printf("\x1b[2J");
+	fflush(stdout);
 }

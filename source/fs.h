@@ -5,7 +5,7 @@ typedef int (*RWCallback)(size_t read, size_t filesize);
 
 #define MAXIMUM(max, size) ( ( size > max ) ? max : size )
 #ifndef FS_CHUNK
-#define FS_CHUNK 0x100000
+#define FS_CHUNK 0x80000
 #endif
 
 int NAND_GetFileSize(const char* filepath, size_t*);

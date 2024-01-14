@@ -107,7 +107,7 @@ int sysmenu_process() {
 	int ret;
 	uint32_t size = 0;
 	signed_blob* buffer = NULL;
-	char filepath[ISFS_MAXPATH] = "/title/00000001/00000002/content/";
+	char filepath[0x80] __aligned(0x20) = "/title/00000001/00000002/content/";
 
 	ret = ES_GetStoredTMDSize(0x100000002LL, &size);
 	if (ret < 0) {
@@ -155,6 +155,19 @@ int sysmenu_process() {
 		if (content->type & 0x8000)
 			continue;
 
+		/*
+			STACK DUMP:
+			800fe468 <memmove+376>			stb r6,0(r7)
+			8010f968 <__ssprint_r+104>		bl 0x800fe350 <memmove>
+			80008488 <sysmenu_process+560>	bl 0x800f7038 <sprintf>
+
+			"why is r7 0..?"
+			*makes filepath 2x bigger
+			"Failed to open <garbage memory>0000001/00000002/content/00000097.app (-6)"
+			*add __aligned(0x20)
+			*works
+			*ok?
+		*/
 		sprintf(strrchr(filepath, '/'), "/%08x.app", content->cid);
 
 		if (content->index == p_tmd->boot_index) { // how Priiloader installer does it
@@ -176,7 +189,7 @@ int sysmenu_process() {
 	}
 
 	if(!sm_archive.cid) {
-		printf("Failed to identify system menu archive!");
+		puts("Failed to identify system menu archive!");
 		ret = -ENOENT;
 		goto finish;
 	}

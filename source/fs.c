@@ -9,11 +9,14 @@
 #include "fs.h"
 
 int progressbar(size_t read, size_t total) {
-	printf("\r[");
-	for (size_t i = 0; i < total; i += FS_CHUNK)
-		putchar((i < read) ? '=' : ' ');
+	printf("\r[\x1b[42;1m");
+	for (size_t i = 0; i < total; i += FS_CHUNK)  {
+		if (i > read)
+			printf("\x1b[40m");
 
-	printf("] %u / %u bytes (%.2f%%) ", read, total, (read / (float)total) * 100);
+		putchar(' ');
+	}
+	printf("\x1b[40m] %u / %u bytes (%.2f%%) ", read, total, (read / (float)total) * 100);
 	if (read == total)
 		putchar('\n');
 
