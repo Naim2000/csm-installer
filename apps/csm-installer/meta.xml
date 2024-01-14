@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <app version="1">
 	<name>csm-installer</name>
-	<version>1.0</version>
+	<version>1.1</version>
 	<release_date>20231126000000</release_date>
 	<coder>thepikachugamer</coder>
 	<short_description>Wii menu theme installer.</short_description>
 	<long_description>Basic Wii menu theme (.csm) installer with directory navigation support.
 
 Won't brick your vWii this time.
-Does not play well with modded Wii menu versions. (Waninkoko's 4.3b, etc.)
+Does not play well with modded Wii menu versions. (Waninkoko's 4.3b, mauifrog's 4.1 mod, etc. Not Priiloader, though.)
 
 Source code: https://github.com/Naim2000/directory
 </long_description>
