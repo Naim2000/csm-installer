@@ -104,12 +104,12 @@ int main(int argc, char* argv[]) {
 
 		printf("Contents count: %hu\n\n", wad->contentsCount);
 */
-		int option = QuickActionMenu((const char* []){
+		int option = QuickActionMenu(5, (const char* []){
 			"Install WAD",
 			"Uninstall WAD",
 			"Unpack WAD",
 			"option4",
-			"option5", 0
+			"option5"
 		});
 		if (option < 0)
 			continue;

@@ -11,8 +11,6 @@
 #include "fs.h"
 #include "crypto.h"
 #include "malloc.h"
-#include "crypto.h"
-#include "malloc.h"
 
 static const char u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
 
@@ -81,9 +79,7 @@ static char _getSMVersionMajor(uint16_t rev) {
 	return 0;
 }
 
-static char s_getSMRegion(uint16_t rev) {
-	if (!rev) return 0;
-
+static char _getSMRegion(uint16_t rev) {
 	if (!rev)
 		return 0;
 

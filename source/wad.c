@@ -209,7 +209,10 @@ fail:
 	return NULL;
 }
 
+_Pragma("GCC diagnostic push")
+_Pragma("GCC diagnostic ignored \"-Wstringop-overflow\"")
 static inline void void_signature(signed_blob* blob) { memset(SIGNATURE_SIG(blob), 0x00, SIGNATURE_SIZE(blob) - 0x4); }
+_Pragma("GCC diagnostic pop")
 
 static bool Fakesign(signed_blob* s_tmd, signed_blob* s_tik) {
 	sha1 hash = {};

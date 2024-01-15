@@ -17,17 +17,11 @@
 
 
 struct entry {
-	u8 flags;
-	char name[NAME_MAX];
+	char name[NAME_MAX + 1];
+	uint32_t flags;
 };
 
 static char cwd[PATH_MAX];
-
-static bool isDirectory(const char* path) {
-	struct stat statbuf;
-	stat(path, &statbuf);
-	return S_ISDIR(statbuf.st_mode) > 0;
-}
 
 static char* goBack(char* path) {
 	if(strchr(path, '/') == strrchr(path, '/'))
@@ -46,8 +40,8 @@ bool hasFileExtension(const char* name, const char* ext) {
 }
 
 static void PrintEntries(struct entry entries[], int start, int count, int max, int selected) {
-	if (!count) {
-		printf("\t\x1b[30;1m[Nothing.]\x1b[39m");
+	if (!count || !entries) {
+		printf("\t\x1b[30;1m[?]\x1b[39m");
 		return;
 	}
 
@@ -66,14 +60,10 @@ static int GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
 		return 0;
 
 	while ( (pent = readdir(pdir)) != NULL ) {
-		if (!strcmp(pent->d_name, ".") || !strcmp(pent->d_name, ".."))
+		if (!(strcmp(pent->d_name, ".") && strcmp(pent->d_name, "..")))
 			continue;
 
-		strcat(cwd, pent->d_name);
-		bool isdir = isDirectory(cwd);
-		*(strrchr(cwd, '/') + 1) = '\x00';
-
-		if (isdir || !filter || filter(pent->d_name))
+		if (pent->d_type == DT_DIR || !filter || filter(pent->d_name))
 			count++;
 	}
 
@@ -94,10 +84,7 @@ static int ReadDirectory(DIR* pdir, struct entry entries[], int count, FileFilte
 		if (!strcmp(pent->d_name, ".") || !strcmp(pent->d_name, ".."))
 			continue;
 
-		strcat(cwd, pent->d_name);
-		bool isdir = isDirectory(cwd);
-		*(strrchr(cwd, '/') + 1) = '\x00';
-
+		bool isdir = pent->d_type == DT_DIR;
 		if (!isdir && filter && !filter(pent->d_name))
 			continue;
 
@@ -125,12 +112,9 @@ static struct entry* GetDirectoryEntries(const char* path, struct entry** entrie
 	cnt = GetDirectoryEntryCount(pdir, filter);
 	if (!cnt) {
 		*count = 0;
-		if (*entries)
-			(*entries)[0] = (struct entry){ 0x80, {} };
-		else
-			errno = ENOENT;
+		errno = ENOENT;
 
-		return NULL;
+		return *entries;
 	}
 
 	// If ptr is NULL, then the call is equivalent to malloc(size), for all values of size.
@@ -201,6 +185,12 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 		for(;;) {
 			scanpads();
 			u32 buttons = buttons_down(0);
+			if (!cnt) {
+				while (!buttons_down(0));
+				GetDirectoryEntries(goBack(cwd), &entries, &cnt, filter);
+				break;
+			}
+			
 			if (buttons & WPAD_BUTTON_DOWN) {
 				if (index >= (cnt - 1)) {
 					start = index = 0;
@@ -267,39 +257,66 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 	}
 }
 
-int QuickActionMenu(const char* argv[]) {
-	int maxWidth = 0, i = 0, ii = 0;
-	
-	while (argv[ii])
-	{	int len = strlen(argv[ii++]);
-		maxWidth = MAX(len, maxWidth);	}
-
+/* type 1 */
+int QuickActionMenu(int argc, const char* argv[]) {
+	int i = 0;
 
 	for (;;) {
-		int spaceWidth = (1 + maxWidth - strlen(argv[i])) >> 1;
-		int stringLen = (strlen(argv[i]) + 1) >> 1;
-
-		printf(
-			"< %*s%-*s%*s >\r", // <-- Atrocity
-			spaceWidth, "",
-			stringLen, argv[i],
-			spaceWidth, "");
+		printf("\r\x1b[2K%s %s %s",
+			i? "<" : "\x1b[30;1m<\x1b[39m",
+			argv[i],
+			i + 1 < argc? ">" : "\x1b[30;1m>\x1b[39m"
+		);
 
 		for (;;) {
 			scanpads();
 			uint32_t buttons = buttons_down(0);
 
 			if (buttons & WPAD_BUTTON_RIGHT) {
-				if (++i == ii) i = 0;
+				if (i + 1 < argc) i++;
 				break;
 			}
 			else if (buttons & WPAD_BUTTON_LEFT) {
-				if (--i < 0) i = ii - 1;
+				if (i) i--;
 				break;
 			}
 
 			else if (buttons & WPAD_BUTTON_A) return ++i;
+			else if (buttons & (WPAD_BUTTON_B | WPAD_BUTTON_HOME)) return -1;
+		}
+	}
+}
+
+
+/* type 2
+int QuickActionMenu(const char* argv[]) {
+	int cnt = 0, index = 0, curX = 0, curY = 0;
+	while (argv[++cnt])
+		;
+
+	CON_GetPosition(&curX, &curY);
+
+	for (;;) {
+		printf("\x1b[%i;%iH", curY, curX);
+		for (int i = 0; i < cnt; i++)
+			printf("%s	%s\x1b[40m\x1b[39m\n", i == index? ">>\x1b[47;1m\x1b[30m" : "  ", argv[i]);
+
+		for (;;) {
+			scanpads();
+			uint32_t buttons = buttons_down(0);
+
+			if (buttons & WPAD_BUTTON_DOWN) {
+				if (++index == cnt) index = 0;
+				break;
+			}
+			else if (buttons & WPAD_BUTTON_UP) {
+				if (--index < 0) index = cnt - 1;
+				break;
+			}
+
+			else if (buttons & WPAD_BUTTON_A) return ++index;
 			else if (buttons & WPAD_BUTTON_B) return -1;
 		}
 	}
 }
+*/

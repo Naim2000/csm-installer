@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <ogc/es.h>
 #include <ogc/ipc.h>
 #include <ogc/isfs.h>
 
