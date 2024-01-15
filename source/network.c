@@ -101,10 +101,9 @@ int DownloadFile(char* url, blob* blob) {
 	putchar('\n');
 	curl_easy_cleanup(curl);
 
-	if (res != CURLE_OK) {
+	if (res != CURLE_OK)
 		if (!ebuffer[0])
 			sprintf(ebuffer, "%s", curl_easy_strerror(res));
-	}
 
 	return res;
 }

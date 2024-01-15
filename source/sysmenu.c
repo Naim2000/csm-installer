@@ -1,17 +1,16 @@
-#include "sysmenu.h"
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <ogc/es.h>
 #include <ogc/isfs.h>
-#include <wiiuse/wpad.h>
 #include <ogc/lwp_watchdog.h>
 #include <mbedtls/aes.h>
 
-#include "pad.h"
+#include "sysmenu.h"
 #include "fs.h"
+#include "crypto.h"
+#include "malloc.h"
 #include "crypto.h"
 #include "malloc.h"
 
@@ -82,7 +81,9 @@ static char _getSMVersionMajor(uint16_t rev) {
 	return 0;
 }
 
-static char _getSMRegion(uint16_t rev) {
+static char s_getSMRegion(uint16_t rev) {
+	if (!rev) return 0;
+
 	if (!rev)
 		return 0;
 
@@ -115,6 +116,7 @@ int sysmenu_process() {
 		goto finish;
 	}
 
+	buffer = memalign32(MAX(size, STD_SIGNED_TIK_SIZE));
 	buffer = memalign32(MAX(size, STD_SIGNED_TIK_SIZE));
 	if (!buffer) {
 		printf("Failed to allocate space for TMD...?\n");

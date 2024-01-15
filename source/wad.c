@@ -9,17 +9,11 @@
 #include <mbedtls/sha1.h>
 
 #include "wad.h"
+#include "crypto.h"
+#include "malloc.h"
 
 #define roundup16(len) (((len) + 0x0F) & ~0x0F)
 #define roundup64(off) (((off) + 0x3F) & ~0x3F)
-
-extern void* memalign(size_t, size_t);
-
-static const aeskey CommonKeys[] = {
-/* Standard common key */	{ 0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7 },
-/*  Korean common key  */	{ 0x63, 0xb8, 0x2b, 0xb4, 0xf4, 0x61, 0x4e, 0x2e, 0x13, 0xf2, 0xfe, 0xfb, 0xba, 0x4c, 0x9b, 0x7e },
-/*   vWii common key   */	{ 0x30, 0xbf, 0xc7, 0x6e, 0x7c, 0x19, 0xaf, 0xbb, 0x23, 0x16, 0x33, 0x30, 0xce, 0xd7, 0xc2, 0x8d },
-};
 
 const char* wad_strerror(int ret) {
 	switch (ret) {
@@ -73,6 +67,7 @@ wad_t* wadInit(const char* filepath) {
 	size_t certsOffset, crlOffset, tikOffset, tmdOffset, contentsStart;
 	signed_blob* s_tmd = NULL;
 	signed_blob* s_tik = NULL;
+	wad_t* wad = NULL;
 
 	FILE* fp = fopen(filepath, "rb");
 	if (!fp) {
@@ -94,7 +89,7 @@ wad_t* wadInit(const char* filepath) {
 
 	if (header.crlSize) {
 		crlOffset = roundup64(certsOffset + header.certsSize);
-		tikOffset = roundup64((crlOffset + header.crlSize));
+		tikOffset = roundup64(crlOffset + header.crlSize);
 	}
 	else {
 		crlOffset = 0;
@@ -104,7 +99,7 @@ wad_t* wadInit(const char* filepath) {
 	tmdOffset = roundup64(tikOffset + header.tikSize);
 	contentsStart = roundup64(tmdOffset + header.tmdSize);
 
-	s_tmd = memalign(0x20, header.tmdSize);
+	s_tmd = memalign32(header.tmdSize);
 	if (!s_tmd) {
 		puts("Memory allocation for TMD failed.");
 		goto fail;
@@ -119,9 +114,9 @@ wad_t* wadInit(const char* filepath) {
 	tmd* p_tmd = SIGNATURE_PAYLOAD(s_tmd);
 
 	if (p_tmd->vwii_title)
-		puts("WARNING: TMD reports that this is a vWii title");
+		puts("TMD reports that this is a vWii title");
 
-	s_tik = memalign(0x20, header.tikSize);
+	s_tik = memalign32(header.tikSize);
 	if (!s_tmd) {
 		puts("Memory allocation for ticket failed.");
 		goto fail;
@@ -135,27 +130,16 @@ wad_t* wadInit(const char* filepath) {
 
 	tik* p_tik = SIGNATURE_PAYLOAD(s_tik);
 
-	uint8_t ckey_index = p_tik->reserved[0xb];
-	if (ckey_index == 0x02) {
-		puts("WARNING: ticket uses the vWii common key. Requires fakesigning.");
-	}
-	else if (ckey_index > 0x02) {
-		printf("Invalid common key index. (%hhu > 2)\n", ckey_index);
-		goto fail;
-	}
-
-	mbedtls_aes_context aes = {};
 	aeskey tkey = {};
-	int64_t iv[2] = { p_tik->titleid, 0 };
+	GetTitleKey(p_tik, tkey);
 
-	mbedtls_aes_setkey_dec(&aes, CommonKeys[ckey_index], sizeof(aeskey) * 8);
-	mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, sizeof(aeskey), (unsigned char*)iv, p_tik->cipher_title_key, tkey);
-
-	wad_t* wad = memalign(0x20, sizeof(wad_t) + (p_tmd->num_contents * sizeof(struct wadContent)));
+	size_t wad_size = sizeof(wad_t) + (p_tmd->num_contents * sizeof(struct wadContent));
+	wad = malloc(wad_size);
 	if (!wad) {
 		puts("Memory allocation for wad structure failed.");
 		goto fail;
 	}
+	memset(wad, 0, wad_size);
 
 	wad->header = header;
 	wad->fp = fp;
@@ -169,17 +153,49 @@ wad_t* wadInit(const char* filepath) {
 
 	for (int i = 0; i < p_tmd->num_contents; i++) {
 		struct wadContent* wContent = wad->contents + i;
+		tmd_content* content = p_tmd->contents + i;
 
-		wContent->content = p_tmd->contents[i];
+		wContent->content = *content;
 		wContent->offset = (i == 0) ?
 			contentsStart :
 			wContent[-1].offset + roundup64(wContent[-1].content.size);
-		// wContent->offset = (i? wContent[i - 1].offset : contentsStart) + roundup64(i? wContent[i - 1].content.size : 0);
+
+		fseek(fp, wContent->offset, SEEK_SET);
+
+		__attribute__((aligned(0x20)))
+		static unsigned char buffer[0x4000];
+		mbedtls_aes_context  aes = {};
+		mbedtls_sha1_context sha = {};
+		aesiv iv = {};
+		sha1 hash = {};
+		size_t csize = content->size;
+
+		iv.index = content->index;
+		mbedtls_aes_setkey_dec(&aes, tkey, 128);
+		mbedtls_sha1_starts_ret(&sha);
+		
+		while (csize) {
+			size_t read = MIN(sizeof(buffer), csize - read);
+
+			if (!fread(buffer, roundup16(read), 1, fp))
+				goto fail;
+
+			mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, roundup16(read), iv.full, buffer, buffer);
+			mbedtls_sha1_update_ret(&sha, buffer, read);
+
+			csize -= read;
+		}
+
+		mbedtls_sha1_finish_ret(&sha, hash);
+		if (memcmp(content->hash, hash, sizeof(sha1)) != 0) {
+			printf("Hash mismatch for content #%i! (cid=%u)\n", i, content->cid);
+			goto fail;
+		}
 	}
 
 	wad->titleID = p_tmd->title_id;
 	wad->titleVer = p_tmd->title_version;
-	wad->titleIOS = (uint32_t)(p_tmd->sys_version & 0xFFFFFFFF);
+	wad->titleIOS = p_tmd->sys_version & 0xFFFFFFFF;
 	memcpy(wad->titleKey, tkey, sizeof(aeskey));
 
 	free(s_tmd);
@@ -189,6 +205,7 @@ wad_t* wadInit(const char* filepath) {
 fail:
 	free(s_tmd);
 	free(s_tik);
+	wadFree(wad);
 	return NULL;
 }
 
@@ -203,12 +220,12 @@ static bool Fakesign(signed_blob* s_tmd, signed_blob* s_tik) {
 		uint16_t v = 0;
 		do {
 			p_tmd->fill3 = v++;
-			mbedtls_sha1_ret(p_tmd, TMD_SIZE(p_tmd), hash);
-			if (hash[0] = 0x00)
+			mbedtls_sha1_ret((unsigned char*)p_tmd, TMD_SIZE(p_tmd), hash);
+			if (hash[0] == 0x00)
 				break;
 		} while (v);
 
-		if (v)
+		if (!v)
 			return false;
 	}
 
@@ -218,12 +235,12 @@ static bool Fakesign(signed_blob* s_tmd, signed_blob* s_tik) {
 		uint16_t v = 0;
 		do {
 			p_tik->padding = v++;
-			mbedtls_sha1_ret(p_tik, sizeof(tik), hash);
-			if (hash[0] = 0x00)
+			mbedtls_sha1_ret((unsigned char*)p_tik, sizeof(tik), hash);
+			if (hash[0] == 0x00)
 				break;
 		} while (v);
 
-		if (v)
+		if (!v)
 			return false;
 	}
 
@@ -238,9 +255,9 @@ int wadInstall(wad_t* wad) {
 	signed_blob* s_tik = NULL;
 	signed_blob* s_tmd = NULL;
 
-	s_certs = memalign(0x20, wad->header.certsSize);
-	s_tik = memalign(0x20, wad->header.tikSize);
-	s_tmd = memalign(0x20, wad->header.tmdSize);
+	s_certs = memalign32(wad->header.certsSize);
+	s_tik = memalign32(wad->header.tikSize);
+	s_tmd = memalign32(wad->header.tmdSize);
 	if (!s_certs || !s_tik || !s_tmd) {
 		ret = -ENOMEM;
 		goto finish;
@@ -256,7 +273,7 @@ int wadInstall(wad_t* wad) {
 	fread(s_tmd, 1, wad->header.tmdSize, wad->fp);
 
 	if (wad->header.crlSize) {
-		s_crl = memalign(0x20, wad->header.crlSize);
+		s_crl = memalign32(wad->header.crlSize);
 		if (!s_crl) {
 			ret = -ENOMEM;
 			goto finish;
@@ -281,12 +298,7 @@ int wadInstall(wad_t* wad) {
 
 	if (p_tik->reserved[0xb] == 0x02) {
 		puts("This ticket uses the vWii common key, let's change that.");
-		mbedtls_aes_context aes = {};
-		int64_t iv[2] = { p_tik->titleid, 0 };
-
-		p_tik->reserved[0xb] = 0x00;
-		mbedtls_aes_setkey_enc(&aes, CommonKeys[0], sizeof(aeskey) * 8);
-		mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, sizeof(aeskey), (unsigned char*)iv, wad->titleKey, p_tik->cipher_title_key);
+		ChangeCommonKey(p_tik, 0);
 		if (!Fakesign(0, s_tik)) {
 			puts("Failed to fakesign ticket!");
 			ret = -EPERM;
@@ -309,7 +321,7 @@ int wadInstall(wad_t* wad) {
 	puts("OK!");
 
 	if (wad->header.tmdSize != s_tmd_size)
-		printf("WARNING: TMD size stated in header is incorrect! (%u != %u)\n", wad->header.tmdSize, s_tmd_size);
+		printf("\x1b[1;33mWARNING: TMD size stated in header is incorrect! (%u != %u)\x1b[39m\n", wad->header.tmdSize, s_tmd_size);
 
 	printf(">   Starting title installation... ");
 	ret = ES_AddTitleStart(s_tmd, s_tmd_size, s_certs, wad->header.certsSize, s_crl, wad->header.crlSize);
@@ -361,7 +373,7 @@ int wadInstall(wad_t* wad) {
 			goto finish;
 		}
 
-		puts("OK!");
+		putchar('\r');
 	}
 
 	if (!ret) {

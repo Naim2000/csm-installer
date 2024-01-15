@@ -59,7 +59,7 @@ int FAT_GetFileSize(const char* filepath, size_t* size) {
 }
 
 int NAND_Read(const char* filepath, void* buffer, size_t filesize, RWCallback callback) {
-	if (!filesize || !buffer) return -EINVAL;
+	if (!filesize || !buffer || (uintptr_t)buffer & 0x1F) return -EINVAL;
 
 	int ret = ISFS_Open(filepath, ISFS_OPEN_READ);
 	if (ret < 0)
@@ -68,7 +68,7 @@ int NAND_Read(const char* filepath, void* buffer, size_t filesize, RWCallback ca
 	int fd = ret;
 	size_t read = 0;
 	while (read < filesize) {
-		ret = ISFS_Read(fd, buffer + read, MAXIMUM(FS_CHUNK, filesize - read));
+		ret = ISFS_Read(fd, buffer + read, MIN(FS_CHUNK, filesize - read));
 		if (ret <= 0)
 			break;
 
@@ -94,7 +94,7 @@ int FAT_Read(const char* filepath, void* buffer, size_t filesize, RWCallback cal
 
 	size_t read = 0;
 	while (read < filesize) {
-		size_t _read = fread(buffer + read, 1, MAXIMUM(FS_CHUNK, filesize - read), fp);
+		size_t _read = fread(buffer + read, 1, MIN(FS_CHUNK, filesize - read), fp);
 		if (!_read)
 			break;
 
@@ -120,7 +120,7 @@ int NAND_Write(const char* filepath, const void* buffer, size_t filesize, RWCall
 	int fd = ret;
 	size_t wrote = 0;
 	while (wrote < filesize) {
-		ret = ISFS_Write(fd, buffer + wrote, MAXIMUM(FS_CHUNK, filesize - wrote));
+		ret = ISFS_Write(fd, buffer + wrote, MIN(FS_CHUNK, filesize - wrote));
 		if (ret <= 0)
 			break;
 
@@ -144,7 +144,7 @@ int FAT_Write(const char* filepath, const void* buffer, size_t filesize, RWCallb
 
 	size_t wrote = 0;
 	while (wrote < filesize) {
-		size_t _wrote = fwrite(buffer + wrote, 1, MAXIMUM(FS_CHUNK, filesize - wrote), fp);
+		size_t _wrote = fwrite(buffer + wrote, 1, MIN(FS_CHUNK, filesize - wrote), fp);
 		if (!_wrote)
 			break;
 

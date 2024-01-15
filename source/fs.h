@@ -1,9 +1,9 @@
+#include <sys/param.h>
 #include <ogc/isfs.h>
 #include <fat.h>
 
 typedef int (*RWCallback)(size_t read, size_t filesize);
 
-#define MAXIMUM(max, size) ( ( size > max ) ? max : size )
 #ifndef FS_CHUNK
 #define FS_CHUNK 0x80000
 #endif

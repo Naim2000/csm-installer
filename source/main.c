@@ -22,8 +22,8 @@ void OSReport(const char* fmt, ...) {}
 
 extern void __exception_setreload(int);
 
-bool isCSMfile(const char* name) {
-	return hasFileExtension(name, "csm") || hasFileExtension(name, "app");
+bool isWADFile(const char* name) {
+	return hasFileExtension(name, "wad");
 }
 
 int main(int argc, char* argv[]) {
@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (!hasPriiloader()) {
-		printf("\x1b[30;1mPlease install Priiloader...\x1b[39m\n");
+		puts("\x1b[30;1mPlease install Priiloader...\x1b[39m");
 		sleep(1);
 
 		puts("Press A to continue.");
@@ -64,7 +64,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	for (;;) {
-		file = SelectFileMenu("Select a .wad file.", "WAD", isWADFile);
+		file = SelectFileMenu("Select a .wad file.", "wad", isWADFile);
 		clear();
 
 		if (!file) {
@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
 
 		printf(
 			"Title ID : %016llx\n"
-			"Revision : %hu (%04hx)\n"
+			"Revision : %hu (0x%04hx)\n"
 			"IOS ver  : IOS%i\n\n", wad->titleID, wad->titleVer, wad->titleVer, wad->titleIOS);
 /*
 		printf(
