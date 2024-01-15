@@ -266,3 +266,40 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 		}
 	}
 }
+
+int QuickActionMenu(const char* argv[]) {
+	int maxWidth = 0, i = 0, ii = 0;
+	
+	while (argv[ii])
+	{	int len = strlen(argv[ii++]);
+		maxWidth = MAX(len, maxWidth);	}
+
+
+	for (;;) {
+		int spaceWidth = (1 + maxWidth - strlen(argv[i])) >> 1;
+		int stringLen = (strlen(argv[i]) + 1) >> 1;
+
+		printf(
+			"< %*s%-*s%*s >\r", // <-- Atrocity
+			spaceWidth, "",
+			stringLen, argv[i],
+			spaceWidth, "");
+
+		for (;;) {
+			scanpads();
+			uint32_t buttons = buttons_down(0);
+
+			if (buttons & WPAD_BUTTON_RIGHT) {
+				if (++i == ii) i = 0;
+				break;
+			}
+			else if (buttons & WPAD_BUTTON_LEFT) {
+				if (--i < 0) i = ii - 1;
+				break;
+			}
+
+			else if (buttons & WPAD_BUTTON_A) return ++i;
+			else if (buttons & WPAD_BUTTON_B) return -1;
+		}
+	}
+}

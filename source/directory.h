@@ -9,3 +9,4 @@ typedef bool (*FileFilter)(const char* name);
 char* pwd();
 char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter filter);
 bool hasFileExtension(const char* path, const char* extension);
+int QuickActionMenu(const char* argv[]);

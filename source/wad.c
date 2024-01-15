@@ -175,7 +175,7 @@ wad_t* wadInit(const char* filepath) {
 		mbedtls_sha1_starts_ret(&sha);
 		
 		while (csize) {
-			size_t read = MIN(sizeof(buffer), csize - read);
+			size_t read = MIN(sizeof(buffer), csize);
 
 			if (!fread(buffer, roundup16(read), 1, fp))
 				goto fail;

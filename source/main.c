@@ -104,22 +104,26 @@ int main(int argc, char* argv[]) {
 
 		printf("Contents count: %hu\n\n", wad->contentsCount);
 */
-		printf(
-			"Press +/START to continue.\n"
-			"Press any other button to cancel.\n\n"
-		);
-
-		wait_button(0);
-		if (!buttons_down(WPAD_BUTTON_PLUS)) {
-			wadFree(wad);
+		int option = QuickActionMenu((const char* []){
+			"Install WAD",
+			"Uninstall WAD",
+			"Unpack WAD",
+			"option4",
+			"option5", 0
+		});
+		if (option < 0)
 			continue;
-		}
 
-		ret = wadInstall(wad);
-		if (ret < 0)
-			printf("wadInstall() failed (%i)\n%s\n", ret, wad_strerror(ret));
-		else
-			printf("\x1b[32mDone!\x1b[39m\n");
+		switch (option) {
+			case 1:
+				ret = wadInstall(wad);
+				if (ret < 0) printf("wadInstall() failed (%i)\n%s\n", ret, wad_strerror(ret));
+				else printf("\x1b[32mDone!\x1b[39m\n");
+				break;
+			
+			default:
+				puts("Not implemented");
+		}
 
 		wadFree(wad);
 		puts("Press any button to continue.");
