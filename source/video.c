@@ -13,6 +13,7 @@
 
 static void* xfb = NULL;
 static GXRModeObj vmode = {};
+static int conX, conY;
 
 // from LoadPriiloader
 __attribute__((constructor))
@@ -24,7 +25,7 @@ void init_video() {
 	vmode.viWidth = 672;
 
 	// set correct middlepoint of the screen
-    if (vmode.viTVMode & (VI_PAL << 2)) {
+    if (vmode.viTVMode >> 2 == VI_PAL) {
 		vmode.viXOrigin = (VI_MAX_WIDTH_PAL - vmode.viWidth) / 2;
 		vmode.viYOrigin = (VI_MAX_HEIGHT_PAL - vmode.viHeight) / 2;
 	}
@@ -46,7 +47,8 @@ void init_video() {
 	// Initialise the console
 	CON_Init(xfb, (vmode.viWidth + vmode.viXOrigin - CONSOLE_WIDTH) / 2,
              (vmode.viHeight + vmode.viYOrigin - CONSOLE_HEIGHT) / 2,
-             CONSOLE_WIDTH, CONSOLE_HEIGHT, CONSOLE_WIDTH * VI_DISPLAY_PIX_SZ);
+             CONSOLE_WIDTH, CONSOLE_HEIGHT, vmode.fbWidth * VI_DISPLAY_PIX_SZ);
+	CON_GetMetrics(&conX, &conY);
 
 	VIDEO_ClearFrameBuffer(&vmode, xfb, COLOR_BLACK);
 	VIDEO_SetNextFramebuffer(xfb);
@@ -59,6 +61,15 @@ void init_video() {
 
 void clear() {
 	VIDEO_WaitVSync();
-	printf("\x1b[2J");
+	VIDEO_ClearFrameBuffer(&vmode, xfb, COLOR_BLACK);
+	printf("%s", "\x1b[0;0H");
+}
+
+void clearln() {
+	putchar('\r');
+	for (int i = 1; i < conX; i++)
+		putchar(' ');
+
+	putchar('\r');
 	fflush(stdout);
 }

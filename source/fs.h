@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <sys/param.h>
 #include <ogc/isfs.h>
 #include <fat.h>
@@ -15,3 +16,4 @@ int FAT_Read(const char* filepath, void* buffer, size_t filesize, RWCallback cb)
 int NAND_Write(const char* filepath, const void* buffer, size_t filesize, RWCallback cb);
 int FAT_Write(const char* filepath, const void* buffer, size_t filesize, RWCallback cb);
 int progressbar(size_t read, size_t filesize);
+bool ReadOpenFile(void* __restrict buffer, ssize_t offset, size_t size, FILE* fp);

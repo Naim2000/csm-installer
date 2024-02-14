@@ -160,3 +160,19 @@ int FAT_Write(const char* filepath, const void* buffer, size_t filesize, RWCallb
 	else
 		return -EIO;
 }
+
+bool ReadOpenFile(void* buf, ssize_t offset, size_t size, FILE* fp) {
+	if ((offset >= 0) && fseek(fp, offset, SEEK_SET) < 0) {
+		fseek(fp, 0, SEEK_END);
+		size_t length = ftell(fp);
+		if (offset >= length) printf("\n\x1b[30;1mThis file is kind of small (0x%08x >= 0x%08x)\n", offset, length);
+		return false;
+	}
+	else offset = ftell(fp);
+
+	if (!fread(buf, size, 1, fp)) {
+		printf("\n\x1b[41;1m\x1b[30mFile could not be read (at 0x%08x-0x%08x.)\x1b[39m\x1b[40m\n", offset, offset + size);
+		return false;
+	}
+	return true;
+}

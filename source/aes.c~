@@ -1,0 +1,155 @@
+/*
+ * This made IOS crash a lot.
+ */
+
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <errno.h>
+#include <gctypes.h>
+#include <ogc/cache.h>
+#include <ogc/ipc.h>
+#include <ogc/machine/processor.h>
+
+#include "aes.h"
+
+enum {
+	HW_AHBPROT  = 0xcd800064,
+
+	HW_AES_CTRL = 0xcd020000,
+	HW_AES_SRC  = 0xcd020004,
+	HW_AES_DEST = 0xcd020008,
+	HW_AES_KEY  = 0xcd02000c,
+	HW_AES_IV   = 0xcd020010,
+};
+
+enum Command { Copy = 0x0, Encrypt = 0x2, Decrypt = 0x3 };
+
+static volatile uint32_t*  AES_KEY = (volatile uint32_t*) HW_AES_KEY;
+static volatile uint32_t*  AES_IV  = (volatile uint32_t*) HW_AES_IV;
+static volatile uintptr_t* AES_SRC = (volatile uintptr_t*)HW_AES_SRC;
+static volatile uintptr_t* AES_DST = (volatile uintptr_t*)HW_AES_DEST;
+
+static void* last_iv_ptr = NULL;
+static bool hw_aes_ok = false;
+
+static void AES_WaitOnEngine(void) {
+	while (read32(HW_AES_CTRL) & 0x80000000) {
+		putchar('.');
+		usleep(10);
+	}
+}
+static void AES_ResetEngine(void)  {
+	mask32(HW_AES_CTRL, 0x80000000, 0);
+}
+static void AES_WaitAndReset(void) { AES_WaitOnEngine(); AES_ResetEngine(); }
+
+static void AES_SetKey(const void* key) {
+	const uint32_t* ptr = key;
+	for (int i = 0; i < 4; i++)
+		write32(AES_KEY, *ptr++);
+
+}
+
+static void AES_SetIV(const void* iv) {
+	const uint32_t* ptr = iv;
+	for (int i = 0; i < 4; i++)
+		write32(AES_IV, *ptr++);
+}
+
+void AES_ResetIV(void) { last_iv_ptr = NULL; }
+
+static int AES_ExecuteCommand(enum Command cmd, const void* key, const void* iv, const void* in, void* out, uint32_t size)
+{
+	if (!__builtin_is_aligned(in, 0x10) || !__builtin_is_aligned(out, 0x10))
+		return -EFAULT;
+
+	if (size & 0x0F)
+		return -EINVAL;
+
+	// make sure we get all those changes through...
+	DCFlushRange((void*)in, size);
+
+	puts("waiting to reset AES engine");
+	AES_WaitAndReset();
+
+	printf("AES_ExecuteCommand(%i, %p, %p, %u)\n", cmd, in, out, size);
+
+	// hey c'mon ooh
+	unsigned intr_level;
+	_CPU_ISR_Disable(intr_level);
+	{
+		AES_SetKey(key);
+		AES_SetIV(iv);
+		write32(AES_SRC, in);
+		write32(AES_DST, out);
+		bool chain_cbc = (iv == last_iv_ptr);
+		last_iv_ptr = iv;
+		unsigned n_blocks = size >> 4;
+		while (n_blocks) {
+			unsigned cnt = (n_blocks > 0x1000) ? 0x1000 : n_blocks;
+			uint16_t paramsHi = 1 << 15 | 1 << 14 | (cmd & 0x3) << 11;
+			uint16_t paramsLo = (chain_cbc << 12) | ((cnt - 1) & 0xFFF);
+			chain_cbc = false;
+			n_blocks -= cnt;
+
+			printf("params=%04hx %04hx\n", paramsHi, paramsLo);
+
+			write16(HW_AES_CTRL + 2, paramsLo);
+			write16(HW_AES_CTRL, paramsHi);
+			AES_WaitOnEngine();
+		}
+		printf("AES src=%p, AES dst=%p, in end=%p\n", *AES_SRC, *AES_DST, in + size);
+	}
+	// scratch-o HEY
+	_CPU_ISR_Restore(intr_level);
+
+	if (in != out) DCInvalidateRange(out, size);
+
+	if (read32(HW_AES_CTRL) & 0x20000000) {
+		puts("\x1b[41;1m\x1b[30m AES engine error \x1b[39m\x1b[40m");
+		return -1;
+	}
+
+	return 0;
+}
+
+bool AES_Init(void) {
+	static volatile uint32_t* AHBPROT = (volatile uint32_t*)HW_AHBPROT;
+
+	if (hw_aes_ok) return true;
+
+	if (*AHBPROT & 0x4) hw_aes_ok = true;
+	else if (*AHBPROT & 0x80000000) {
+		puts("Enabling AES engine access");
+		*AHBPROT |= 0x4;
+		AES_WaitAndReset();
+		// sorry ios im gonna need this one
+		*AHBPROT &= ~0x40000;
+		hw_aes_ok = true;
+	}
+	else
+		puts("HW_AHBPROT is not disabled..!");
+
+	return hw_aes_ok;
+}
+
+void AES_Close(void) {
+	static volatile uint32_t* AHBPROT = (volatile uint32_t*)HW_AHBPROT;
+
+	puts("Disabling AES engine access");
+	*AHBPROT &= ~0x4;
+	*AHBPROT |= 0x40000;
+
+	hw_aes_ok = false;
+}
+
+int AES_Encrypt(const void* key, void* iv, const void* in, void* out, uint32_t size)
+{
+	return AES_ExecuteCommand(Encrypt, key, iv, in, out, size);
+}
+
+int AES_Decrypt(const void* key, void* iv, const void* in, void* out, uint32_t size)
+{
+	return AES_ExecuteCommand(Decrypt, key, iv, in, out, size);
+}

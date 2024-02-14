@@ -1,0 +1,4 @@
+bool AES_Init(void);
+void AES_Close(void);
+int AES_Decrypt(const void* key, void* iv, const void* in, void* out, uint32_t data_size);
+int AES_Encrypt(const void* key, void* iv, const void* in, void* out, uint32_t data_size);

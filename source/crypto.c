@@ -1,6 +1,15 @@
 #include <stdio.h>
+#include <string.h>
+#include <errno.h>
 
 #include "crypto.h"
+#include "malloc.h"
+
+const aeskey CommonKeys[3] = {
+	/* Standard common key */	{ 0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7 },
+	/*  Korean common key  */	{ 0x63, 0xb8, 0x2b, 0xb4, 0xf4, 0x61, 0x4e, 0x2e, 0x13, 0xf2, 0xfe, 0xfb, 0xba, 0x4c, 0x9b, 0x7e },
+	/*   vWii common key   */	{ 0x30, 0xbf, 0xc7, 0x6e, 0x7c, 0x19, 0xaf, 0xbb, 0x23, 0x16, 0x33, 0x30, 0xce, 0xd7, 0xc2, 0x8d },
+};
 
 void GetTitleKey(tik* p_tik, aeskey out) {
 	mbedtls_aes_context aes = {};
@@ -9,7 +18,7 @@ void GetTitleKey(tik* p_tik, aeskey out) {
 
 	uint8_t commonKeyIndex = p_tik->reserved[0xb];
 	if (commonKeyIndex > 0x02) {
-		printf("Unknown common key index!? (0x%hhx)\n", commonKeyIndex);
+		printf("\t\x1b[30;1mUnknown common key index!? (0x%hhx)\x1b[39m\n", commonKeyIndex);
 		commonKeyIndex = 0;
 	}
 	mbedtls_aes_setkey_dec(&aes, CommonKeys[commonKeyIndex], 128);
@@ -23,8 +32,7 @@ void ChangeCommonKey(tik* p_tik, uint8_t index) {
 	aesiv iv = {};
 	iv.titleid = p_tik->titleid;
 
-	if (index > 0x02)
-		return;
+	if (index > 0x02) return;
 
 	GetTitleKey(p_tik, in);
 	p_tik->reserved[0xb] = index;

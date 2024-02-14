@@ -1,27 +1,24 @@
-#include "directory.h"
-
-#include <gccore.h>
-#include <wiiuse/wpad.h>
-#include <fat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
+#include <gccore.h>
+#include <fat.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <errno.h>
-#include <unistd.h>
 
+#include "directory.h"
 #include "video.h"
 #include "pad.h"
+#include "fatMounter.h"
 
 
 struct entry {
 	char name[NAME_MAX + 1];
 	uint32_t flags;
 };
-
-static char cwd[PATH_MAX];
 
 static char* goBack(char* path) {
 	if(strchr(path, '/') == strrchr(path, '/'))
@@ -41,7 +38,7 @@ bool hasFileExtension(const char* name, const char* ext) {
 
 static void PrintEntries(struct entry entries[], int start, int count, int max, int selected) {
 	if (!count || !entries) {
-		printf("\t\x1b[30;1m[?]\x1b[39m");
+		printf("\t\x1b[30;1m[..]\x1b[39m");
 		return;
 	}
 
@@ -52,107 +49,86 @@ static void PrintEntries(struct entry entries[], int start, int count, int max, 
 
 }
 
-static int GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
-	int count = 0;
-	struct dirent* pent;
-
-	if (!pdir)
-		return 0;
-
-	while ( (pent = readdir(pdir)) != NULL ) {
-		if (!(strcmp(pent->d_name, ".") && strcmp(pent->d_name, "..")))
-			continue;
-
-		if (pent->d_type == DT_DIR || !filter || filter(pent->d_name))
-			count++;
-	}
-
-	rewinddir(pdir);
-	return count;
-}
-
-static int ReadDirectory(DIR* pdir, struct entry entries[], int count, FileFilter filter) {
-	if (!pdir)
-		return 0;
-
-	int i = 0;
-	while (i < count) {
-		struct dirent* pent = readdir(pdir);
-		if (!pent)
-			break;
-
-		if (!strcmp(pent->d_name, ".") || !strcmp(pent->d_name, ".."))
-			continue;
-
-		bool isdir = pent->d_type == DT_DIR;
-		if (!isdir && filter && !filter(pent->d_name))
-			continue;
-
-		entries[i].flags =
-			(isdir << 0);
-
-		strcpy(entries[i].name, pent->d_name);
-		if (isdir)
-			strcat(entries[i].name, "/");
-
-		i++;
-	}
-
-	return i;
-}
-
 static struct entry* GetDirectoryEntries(const char* path, struct entry** entries, int* count, FileFilter filter) {
-	DIR* pdir;
+	DIR* pdir = NULL;
+	struct dirent* pent = NULL;
+	struct entry* _entries = NULL;
 	int cnt = 0;
 
 	if (!entries || !count || !path) return NULL;
+
+	*count = 0;
 	if (!(pdir = opendir(path)))
 		return NULL;
 
-	cnt = GetDirectoryEntryCount(pdir, filter);
-	if (!cnt) {
-		*count = 0;
-		errno = ENOENT;
+	while ( (pent = readdir(pdir)) != NULL ) {
+		if (!(strcmp(pent->d_name, ".") && strcmp(pent->d_name, ".."))) continue;
 
-		return *entries;
+		bool isdir = (pent->d_type == DT_DIR);
+
+		if (!isdir && filter && !filter(pent->d_name))
+			continue;
+
+		int i = cnt++;
+		_entries = reallocarray(*entries, cnt, sizeof(struct entry));
+		if (!_entries) {
+			free(*entries);
+			return (*entries = NULL);
+		}
+		*entries = _entries;
+
+		struct entry* entry = _entries + i;
+		strcpy(entry->name, pent->d_name);
+		if (isdir) strcat(entry->name, "/");
+		entry->flags = (isdir << 0);
 	}
 
-	// If ptr is NULL, then the call is equivalent to malloc(size), for all values of size.
-	struct entry* _entries = reallocarray(*entries, cnt, sizeof(struct entry));
-	if (!_entries) {
-		free(*entries);
-		*entries = NULL;
-		errno = ENOMEM;
-		return NULL;
-	}
-	memset(_entries, 0, sizeof(struct entry) * cnt);
-	*count = ReadDirectory(pdir, _entries, cnt, filter);
-	*entries = _entries;
-
+	*count = cnt;
 	closedir(pdir);
 	return *entries;
 }
 
-static const char* FileSelectAction(u8 flags) {
+static const char* FileSelectAction(uint32_t flags) {
 	if (flags & 0x01)	return "Enter";
-	if (flags & 0x80)	return "Go back";
 
 	return "Install";
 }
 
-char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter filter) {
+static void PrintDirectoryHeader(const char* header, const char* cwd, int count, int start, int max) {
+	if (!header) header = "";
+
+	printf("\x1b[1;0H%s\n"
+		   "Viewing [%s] - %i-%i of %i total\n",
+		header, cwd, start + 1, start + MIN(max, count - start), count);
+}
+
+enum { // from console_font_8x16.c
+//	line_ud  = 0xba,
+	line_lr  = 0xcd, 
+
+//	line_tl  = 0xc9,
+//	line_tr  = 0xbb,
+//	line_bl  = 0xc8,
+//	line_br  = 0xbc,
+
+//	line_lj  = 0xcc,
+//	line_rj  = 0xb9,
+};
+
+int SelectFileMenu(const char* header, const char* defaultFolder, SingleFileCallback sfCallback, FileFilter filter, void* userp) {
 	struct entry* entries = NULL;
+	char cwd[PATH_MAX];
+	char filename[PATH_MAX];
 	int cnt = 0, start = 0, index = 0, max = 0;
 	int conX = 0, conY = 0;
-	static char filename[PATH_MAX];
-	static char line[0x80];
+	static char line[100];
 
 	CON_GetMetrics(&conX, &conY);
-	memset(line, 0xc4, conX); // from d2x cIOS installer
+	memset(line, line_lr, conX);
 	line[conX] = 0;
 	max = conY - 6; // 3 lines for the top and 3 lines for the bottom
 
-	getcwd(cwd, sizeof(cwd));
+	sprintf(cwd, "%s:/", GetActiveDeviceName());
 
 	if (defaultFolder)
 		sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
@@ -160,23 +136,22 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 	if (!GetDirectoryEntries(cwd, &entries, &cnt, filter))
 		GetDirectoryEntries(goBack(cwd), &entries, &cnt, filter);
 
+	if (!entries) {
+		perror("GetDirectoryEntries failed");
+		return -errno;
+	}
+
 	for(;;) {
-		if (!entries) {
-			perror("GetDirectoryEntries failed");
-			return NULL;
-		}
-		clear();
-
 		struct entry* entry = entries + index;
-
-		printf("\n%s\nCurrent directory: [%s] - %i-%i of %i total\n%s",
-			header ? header : "", cwd, start + 1, start + MIN(max, cnt - start), cnt, line);
-
+		
+		clear();
+		PrintDirectoryHeader(header, cwd, cnt, start, max);
+		printf("%s", line);
 		PrintEntries(entries, start, cnt, max, index);
 		printf("\x1b[%i;0H%s"
-		//	"Controls:\n"
-			"	A/Right\x10 : %-35s Up\x1e/Down\x1f : Select\n"
-			"	B/\x11Left  : %-35s Home/Start: Exit",
+			"	A/Right\x1a : %-35s Up\x18/Down\x19 : Select\n"
+			"	B/\x1bLeft  : %-35s Home/Start: Exit",
+			//    ^^^^ Lol!!
 			conY - 2, line,
 			FileSelectAction(entry->flags),
 			(strchr(cwd, '/') == strrchr(cwd, '/')) ? "Exit" : "Go back"
@@ -184,9 +159,9 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 
 		for(;;) {
 			scanpads();
-			u32 buttons = buttons_down(0);
+			uint32_t buttons = buttons_down(0);
 			if (!cnt) {
-				while (!buttons_down(0));
+				wait_button(0);
 				GetDirectoryEntries(goBack(cwd), &entries, &cnt, filter);
 				break;
 			}
@@ -217,13 +192,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 				break;
 			}
 			else if (buttons & (WPAD_BUTTON_A | WPAD_BUTTON_RIGHT)) {
-				if (entry->flags & 0x80) {
-					goBack(cwd);
-					GetDirectoryEntries(cwd, &entries, &cnt, filter);
-					index = start = 0;
-					break;
-				}
-				else if (entry->flags & 0x01) {
+				if (entry->flags & 0x01) {
 					sprintf(strrchr(cwd, '/'), "/%s", entry->name);
 					GetDirectoryEntries(cwd, &entries, &cnt, filter);
 					index = start = 0;
@@ -232,16 +201,17 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 				else {
 					strcpy(filename, cwd);
 					strcat(filename, entry->name);
-					free(entries);
-					return filename;
+					clear();
+					printf("%s\n\n", filename);
+					sfCallback(filename, userp);
 				}
 				break;
 			}
-			else if (buttons & (WPAD_BUTTON_B | WPAD_BUTTON_LEFT)) {
+			else if (buttons & WPAD_BUTTON_B) {
 				if (!goBack(cwd)) {
-					errno = ECANCELED;
 					free(entries);
-					return NULL;
+					clear();
+					return 0;
 				}
 
 				GetDirectoryEntries(cwd, &entries, &cnt, filter);
@@ -249,9 +219,9 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 				break;
 			}
 			else if (buttons & WPAD_BUTTON_HOME) {
-				errno = ECANCELED;
 				free(entries);
-				return NULL;
+				clear();
+				return 0;
 			}
 		}
 	}
@@ -262,7 +232,8 @@ int QuickActionMenu(int argc, const char* argv[]) {
 	int i = 0;
 
 	for (;;) {
-		printf("\r\x1b[2K%s %s %s",
+		clearln();
+		printf("%s %s %s",
 			i? "<" : "\x1b[30;1m<\x1b[39m",
 			argv[i],
 			i + 1 < argc? ">" : "\x1b[30;1m>\x1b[39m"
@@ -281,8 +252,8 @@ int QuickActionMenu(int argc, const char* argv[]) {
 				break;
 			}
 
-			else if (buttons & WPAD_BUTTON_A) return ++i;
-			else if (buttons & (WPAD_BUTTON_B | WPAD_BUTTON_HOME)) return -1;
+			else if (buttons & WPAD_BUTTON_A) { clearln(); return ++i; }
+			else if (buttons & (WPAD_BUTTON_B | WPAD_BUTTON_HOME)) { clearln(); return 0; }
 		}
 	}
 }

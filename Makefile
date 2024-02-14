@@ -17,7 +17,7 @@ include $(DEVKITPPC)/wii_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	csm-installer
 BUILD		:=	build
-SOURCES		:=	source
+SOURCES		:=	source/libpatcher source
 DATA		:=	data
 INCLUDES	:=
 
@@ -33,8 +33,7 @@ LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
-LIBS	:=	 -lcurl -lz -lmbedtls -lmbedcrypto -lmbedx509 -lwiisocket -lwiiuse -lbte -lfat -logc -lm -lruntimeiospatch
-
+LIBS	:=	 -lmbedtls -lmbedcrypto -lwiikeyboard -lwiiuse -lbte -lfat -logc -lm
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
 # include and lib
@@ -112,6 +111,7 @@ run:
 #---------------------------------------------------------------------------------
 pack: $(BUILD)
 	@cp $(TARGET).dol apps/$(TARGET)/boot.dol
+	@cp $(TARGET).elf apps/$(TARGET)/unstripped.elf
 	zip -r $(OUTPUT).zip apps/
 
 else

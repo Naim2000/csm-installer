@@ -14,11 +14,11 @@
 
 static const char u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
 
-static aeskey sm_titleKey = {};
-static bool is_vWii = false;
-static bool priiloader = false;
-static tmd sm_tmd = {};
-static tmd_content sm_archive = {};
+static aeskey sm_titleKey;
+static bool is_vWii;
+static bool priiloader;
+static tmd sm_tmd;
+static tmd_content sm_archive, sm_boot;
 
 /* from YAWM ModMii Edition
 const u16 VersionList[] = {
@@ -45,34 +45,34 @@ static char _getSMVersionMajor(uint16_t rev) {
 	if (!rev)
 		return 0;
 
-	switch (rev >> 4) {
+	switch (rev >> 5) {
+		case 0x01:
 		case 0x02:
-		case 0x04:
 			return '1';
 
+		case 0x03:
+		case 0x04:
+		case 0x05:
 		case 0x06:
-		case 0x08:
-		case 0x0a:
-		case 0x0c:
 			return '2';
 
-		case 0x0e:
-		case 0x10:
-		case 0x12:
-		case 0x14:
-		case 0x16:
-		case 0x18:
+		case 0x07:
+		case 0x08:
+		case 0x09:
+		case 0x0a:
+		case 0x0b:
+		case 0x0c:
 			return '3';
 
-		case 0x1a:
-		case 0x1c:
-		case 0x1e:
-		case 0x20:
+		case 0x0d:
+		case 0x0e:
+		case 0x0f:
+		case 0x10:
 		// vWii
-		case 0x22:
-		case 0x26:
+		case 0x11:
+		case 0x13:
 		// Wii Mini
-		case 0x120:
+		case 0x90:
 			return '4';
 	}
 
@@ -83,28 +83,20 @@ static char _getSMRegion(uint16_t rev) {
 	if (!rev)
 		return 0;
 
-	switch (rev & 0xf) {
-		case 0:
-			return 'J';
-
-		case 1:
-			return 'U';
-
-		case 2:
-			return 'E';
-
-		case 6:
-			return 'K';
+	switch (rev & 0x1f) {
+		case 0: return 'J';
+		case 1: return 'U';
+		case 2: return 'E';
+		case 6: return 'K';
+		default: return 0;
 	}
-
-	return 0;
 }
 
 int sysmenu_process() {
 	int ret;
 	uint32_t size = 0;
 	signed_blob* buffer = NULL;
-	char filepath[0x80] __aligned(0x20) = "/title/00000001/00000002/content/";
+	char filepath[ISFS_MAXPATH] __aligned(0x20) = "/title/00000001/00000002/content/";
 
 	ret = ES_GetStoredTMDSize(0x100000002LL, &size);
 	if (ret < 0) {
@@ -112,7 +104,6 @@ int sysmenu_process() {
 		goto finish;
 	}
 
-	buffer = memalign32(MAX(size, STD_SIGNED_TIK_SIZE));
 	buffer = memalign32(MAX(size, STD_SIGNED_TIK_SIZE));
 	if (!buffer) {
 		printf("Failed to allocate space for TMD...?\n");
@@ -122,7 +113,7 @@ int sysmenu_process() {
 
 	ret = ES_GetStoredTMD(0x100000002LL, buffer, size);
 	if (ret < 0) {
-		printf("ES_GetTMDView failed (%i)\n", ret);
+		printf("ES_GetStoredTMD failed (%i)\n", ret);
 		goto finish;
 	}
 
@@ -130,20 +121,8 @@ int sysmenu_process() {
 	sm_tmd = *p_tmd;
 
 	uint16_t rev = p_tmd->title_version;
-	if (rev > 0x2000) {
+	if (rev > 0x2000 || !_getSMRegion(rev) || !_getSMVersionMajor(rev)) {
 		printf("Bad system menu version! (%hu/%04hx)\nInvalid or not vanilla.\n", rev, rev);
-		ret = -EINVAL;
-		goto finish;
-	}
-
-	if (!_getSMRegion(rev)) {
-		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify region (what are the last 4 bits?)\n", rev, rev);
-		ret = -EINVAL;
-		goto finish;
-	}
-
-	if (!_getSMVersionMajor(rev)) {
-		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify major revision.\n", rev, rev);
 		ret = -EINVAL;
 		goto finish;
 	}
@@ -153,25 +132,14 @@ int sysmenu_process() {
 		if (content->type & 0x8000)
 			continue;
 
-		/*
-			STACK DUMP:
-			800fe468 <memmove+376>			stb r6,0(r7)
-			8010f968 <__ssprint_r+104>		bl 0x800fe350 <memmove>
-			80008488 <sysmenu_process+560>	bl 0x800f7038 <sprintf>
-
-			"why is r7 0..?"
-			*makes filepath 2x bigger
-			"Failed to open <garbage memory>0000001/00000002/content/00000097.app (-6)"
-			*add __aligned(0x20)
-			*works
-			*ok?
-		*/
 		sprintf(strrchr(filepath, '/'), "/%08x.app", content->cid);
 
 		if (content->index == p_tmd->boot_index) { // how Priiloader installer does it
 			*(strrchr(filepath, '/') + 1) = '1';
-			if(NAND_GetFileSize(filepath, NULL) >= 0)
+			if (NAND_GetFileSize(filepath, NULL) >= 0) {
 				priiloader = true;
+				sm_boot = *content;
+			}
 		}
 		else {
 			char header[4] ATTRIBUTE_ALIGN(0x20) = {};

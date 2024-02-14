@@ -42,7 +42,20 @@ typedef struct {
 	struct wadContent contents[];
 } wad_t;
 
+enum {
+	REMOVE_CONTENTS,
+	REMOVE_TMD,
+	REMOVE_TIK,
+	REMOVE_TIK_FORCE,
+};
+
+__result_use_check
 wad_t* wadInit(const char* __restrict filepath);
-int wadInstall(wad_t* __restrict);
-const char* wad_strerror(int);
 void wadFree(wad_t*);
+
+int wadInstall(wad_t* __restrict);
+int wadUninstall(wad_t* __restrict, int level);
+int wadExtract(wad_t* __restrict, const char* dir);
+
+
+const char* wad_strerror(int);
