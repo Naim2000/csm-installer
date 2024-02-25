@@ -81,10 +81,8 @@ int main(int argc, char* argv[]) {
 		goto error;
 	}
 
-	if (restore || buttons_down(WPAD_BUTTON_PLUS)) {
-		ret = InstallOriginalTheme();
-		goto error;
-	}
+	if (restore || buttons_down(WPAD_BUTTON_PLUS))
+		DownloadOriginalTheme();
 
 	if (!hasPriiloader()) {
 		printf("\x1b[30;1mPlease install Priiloader...\x1b[39m\n\n");

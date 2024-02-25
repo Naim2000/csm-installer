@@ -20,7 +20,8 @@ static const char
 	wiithemer_sig[] = "wiithemer",
 	binary_path_search[] = "C:\\Revolution\\ipl\\System",
 	binary_path_search_2[] = "D:\\Compat_irdrepo\\ipl\\Compat",
-	binary_path_fmt[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c",
+	binary_path_search_3[] = "c:\\home\\neceCheck\\WiiMenu\\ipl\\bin\\RVL\\Final_", // What
+	binary_path_fmt12[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c",
 	u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
 
 // ?
@@ -43,17 +44,21 @@ version_t GetThemeVersion(const void* buffer, size_t length) {
 	char rgn = 0, major = 0, minor = 0;
 	char* ptr;
 
-	ptr = memmem(buffer, length, binary_path_search, strlen(binary_path_search));
-	if (ptr) ptr += strlen(binary_path_search);
-	else {
-		ptr = memmem(buffer, length, binary_path_search_2, strlen(binary_path_search_2));
-		if (ptr) ptr += strlen(binary_path_search_2);
+
+	if ((ptr = memmem(buffer, length, binary_path_search, strlen(binary_path_search))))
+		ptr += strlen(binary_path_search);
+	else if ((ptr = memmem(buffer, length, binary_path_search_2, strlen(binary_path_search_2))))
+		ptr += strlen(binary_path_search_2);
+	else if ((ptr = memmem(buffer, length, binary_path_search_3, strlen(binary_path_search_3)))) { // Wii mini bruh
+		ptr += strlen(binary_path_search_3);
+		rgn = *ptr;
+		return (version_t) { '4', '3', rgn };
 	}
 
 	if (!ptr)
 		return (version_t) { '?', '?', '?' };
 
-	sscanf(ptr, binary_path_fmt, &major, &minor, &rgn);
+	sscanf(ptr, binary_path_fmt12, &major, &minor, &rgn);
 	return (version_t) { major, minor, rgn };
 }
 
@@ -107,16 +112,17 @@ int InstallTheme(const void* buffer, size_t size) {
 	return 0;
 }
 
-int InstallOriginalTheme() {
+int DownloadOriginalTheme() {
+
 	int ret;
 	char url[0x80] = "http://nus.cdn.shop.wii.com/ccs/download/";
-	char filepath[ISFS_MAXPATH] = {};
+	char filepath[ISFS_MAXPATH];
 	size_t fsize = getArchiveSize();
 	blob download = {};
 	mbedtls_aes_context title = {};
 	aeskey iv = { 0x00, 0x01 };
 
-	puts("Installing original theme.");
+	puts("Downloading original theme.");
 
 	void* buffer = memalign32(fsize);
 	if (!buffer) {
@@ -126,20 +132,14 @@ int InstallOriginalTheme() {
 
 	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
 	ret = NAND_Read(filepath, buffer, fsize, NULL);
-	if (ret >= 0) {
-		if (SignedTheme(buffer, fsize) == default_theme) {
-			puts("You still have the original theme.");
-			goto finish;
-		}
-	}
 
-	sprintf(filepath, "%08x.app", getArchiveCid());
+	sprintf(filepath, "%08x-v%hu.app", getArchiveCid(), getSmVersion());
+	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) goto save;
+
 	ret = FAT_Read(filepath, buffer, fsize, NULL);
-	if (ret >= 0) {
-		if (SignedTheme(buffer, fsize) == default_theme)
-			goto install;
-
-		printf("\x1b[30;1m%s exists on your SD card but it's not for this system?\x1b[39m\n", filepath);
+	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) {
+		printf("Already downloaded. Look for the %s file.\n", filepath);
+		goto finish;
 	}
 
 	puts("Initializing network... ");
@@ -166,20 +166,16 @@ int InstallOriginalTheme() {
 	mbedtls_aes_crypt_cbc(&title, MBEDTLS_AES_DECRYPT, download.size, iv, download.ptr, buffer);
 	free(download.ptr);
 
+save:
 	puts("Saving...");
 	ret = FAT_Write(filepath, buffer, fsize, progressbar);
 	if (ret < 0)
 		perror("Failed to save");
-
-install:
-	puts("Installing...");
-	if (SignedTheme(buffer, fsize) != default_theme) {
-		puts("...Something happened. Not installing this. (This isn't a brick though.)");
-		goto finish;
-	}
-	ret = InstallTheme(buffer, fsize);
+	else
+		printf("Saved to %s.\n", filepath);
 
 finish:
 	free(buffer);
+	sleep(4);
 	return ret;
 }

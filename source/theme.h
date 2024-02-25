@@ -13,5 +13,5 @@ typedef enum {
 
 SignatureLevel SignedTheme(const void* buffer, size_t length);
 int InstallTheme(const void* buffer, size_t length);
-int InstallOriginalTheme();
+int DownloadOriginalTheme(void);
 version_t GetThemeVersion(const void* buffer, size_t length);
