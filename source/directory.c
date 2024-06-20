@@ -14,7 +14,7 @@
 
 #include "video.h"
 #include "pad.h"
-
+#include "fatMounter.h"
 
 struct entry {
 	u8 flags;
@@ -168,7 +168,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 	line[conX] = 0;
 	max = conY - 6; // 3 lines for the top and 3 lines for the bottom
 
-	getcwd(cwd, sizeof(cwd));
+	sprintf(cwd, "%s:/", GetActiveDeviceName());
 
 	if (defaultFolder)
 		sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);

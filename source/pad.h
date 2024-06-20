@@ -1,6 +1,8 @@
-#include <gctypes.h>
+#include <stdint.h>
+#include <wiiuse/wpad.h>
 
 void initpads();
 void scanpads();
-void wait_button(u32);
-u32 buttons_down(u32);
+void stoppads();
+uint32_t wait_button(uint32_t);
+uint32_t buttons_down(uint32_t);

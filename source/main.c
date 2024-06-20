@@ -5,9 +5,9 @@
 #include <gccore.h>
 #include <ogc/es.h>
 #include <wiiuse/wpad.h>
+#include <libpatcher.h>
 
 #include "video.h"
-#include "iospatch.h"
 #include "malloc.h"
 #include "pad.h"
 #include "fs.h"
@@ -17,7 +17,7 @@
 #include "theme.h"
 #include "network.h"
 
-__weak_symbol
+__weak_symbol __printflike(1, 2)
 void OSReport(const char* fmt, ...) {}
 
 extern void __exception_setreload(int);
@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
 	size_t size = 0;
 	int restore = 0;
 
-	__exception_setreload(15);
+	__exception_setreload(10);
 
 	if (argc) {
 		for (int i = 0; i < argc; i++) {
@@ -60,14 +60,13 @@ int main(int argc, char* argv[]) {
 		"Hold + to restore original theme!"
 		"	\x1b[30;1m(timing untested with real Wii Remote)\x1b[39m");
 
-	if (patchIOS(false) < 0) {
+	if (!patch_ahbprot_reset() || !patch_isfs_permissions()) {
+		printf("\x1b[30;1mHW_AHBPROT: %08X\x1b[39m\n", *((volatile uint32_t*)0xcd800064));
 		puts("failed to apply IOS patches! Exiting in 5s...");
 		sleep(5);
-		return 0xCD800064;
 	}
 
 	initpads();
-
 	ISFS_Initialize();
 
 	if (sysmenu_process() < 0)
@@ -75,17 +74,21 @@ int main(int argc, char* argv[]) {
 
 	sleep(2);
 	scanpads();
+	if (buttons_down(WPAD_BUTTON_PLUS)) {
+		puts("\x1b[30;1mReady to redownload original theme\x1b[39m");
+		restore++;
+	}
 
-	if (!mountSD() && !mountUSB()) {
+	if (!FATMount()) {
 		puts("Unable to mount a storage device...");
 		goto error;
 	}
 
-	if (restore || buttons_down(WPAD_BUTTON_PLUS))
-		DownloadOriginalTheme();
+	if (restore || (getSmPlatform() == (ThemeBase)Mini))
+		DownloadOriginalTheme(getSmPlatform() == (ThemeBase)Mini);
 
 	if (!hasPriiloader()) {
-		printf("\x1b[30;1mPlease install Priiloader...\x1b[39m\n\n");
+		printf("\x1b[30;1mPlease install Priiloader..!\x1b[39m\n\n");
 		sleep(1);
 
 		puts("Press A to continue.");
@@ -112,13 +115,12 @@ int main(int argc, char* argv[]) {
 			continue;
 		}
 
-		printf("File size: %.2fMB\n\n", size / 1048576.0f);
+		printf("File size: %.2fMB\n\n", size / (float)0x100000);
 
 		printf("Press +/START to install.\n"
 				"Press any other button to cancel.\n\n");
 
-		wait_button(0);
-		if (buttons_down(WPAD_BUTTON_PLUS))
+		if (wait_button(WPAD_BUTTON_PLUS))
 			break;
 
 		size = 0;
@@ -149,8 +151,7 @@ error:
 	free(buffer);
 	network_deinit();
 	ISFS_Deinitialize();
-	unmountSD();
-	unmountUSB();
+	FATUnmount();
 	puts("Press HOME to exit.");
 	wait_button(WPAD_BUTTON_HOME);
 	WPAD_Shutdown();

@@ -41,25 +41,32 @@ SignatureLevel SignedTheme(const void* buffer, size_t length) {
 }
 
 version_t GetThemeVersion(const void* buffer, size_t length) {
+	ThemeBase base;
 	char rgn = 0, major = 0, minor = 0;
 	char* ptr;
 
 
-	if ((ptr = memmem(buffer, length, binary_path_search, strlen(binary_path_search))))
+	if ((ptr = memmem(buffer, length, binary_path_search, strlen(binary_path_search)))) {
+		base = Wii;
 		ptr += strlen(binary_path_search);
-	else if ((ptr = memmem(buffer, length, binary_path_search_2, strlen(binary_path_search_2))))
+	}
+
+	else if ((ptr = memmem(buffer, length, binary_path_search_2, strlen(binary_path_search_2)))) {
+		base = vWii;
 		ptr += strlen(binary_path_search_2);
+	}
+
 	else if ((ptr = memmem(buffer, length, binary_path_search_3, strlen(binary_path_search_3)))) { // Wii mini bruh
 		ptr += strlen(binary_path_search_3);
 		rgn = *ptr;
-		return (version_t) { '4', '3', rgn };
+		return (version_t) { Mini, '4', '3', rgn };
 	}
 
 	if (!ptr)
-		return (version_t) { '?', '?', '?' };
+		return (version_t) { '?', '?', '?', '?' };
 
 	sscanf(ptr, binary_path_fmt12, &major, &minor, &rgn);
-	return (version_t) { major, minor, rgn };
+	return (version_t) { base, major, minor, rgn };
 }
 
 int InstallTheme(const void* buffer, size_t size) {
@@ -75,11 +82,11 @@ int InstallTheme(const void* buffer, size_t size) {
 	}
 
 	version_t themeversion = GetThemeVersion(buffer, size);
-	if (themeversion.region != getSmRegion() || themeversion.major != getSmVersionMajor()) {
+	if (themeversion.region != getSmRegion() || themeversion.major != getSmVersionMajor() || themeversion.base != getSmPlatform()) {
 		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\n"
-			   "Theme version : %c.X%c\n"
-			   "System version: %c.X%c\n", themeversion.major, themeversion.region,
-										   getSmVersionMajor(), getSmRegion());
+			   "Theme version : %c %c.X%c\n"
+			   "System version: %c %c.X%c\n", themeversion.base, themeversion.major,  themeversion.region,
+											  getSmPlatform(),   getSmVersionMajor(), getSmRegion());
 		return -EINVAL;
 	}
 
@@ -105,15 +112,14 @@ int InstallTheme(const void* buffer, size_t size) {
 	printf("%s\n", filepath);
 	int ret = NAND_Write(filepath, buffer, size, progressbar);
 	if (ret < 0) {
-		printf("error. (%d)\n", ret);
+		printf("error! (%d)\n", ret);
 		return ret;
 	}
 
 	return 0;
 }
 
-int DownloadOriginalTheme() {
-
+int DownloadOriginalTheme(bool silent) {
 	int ret;
 	char url[0x80] = "http://nus.cdn.shop.wii.com/ccs/download/";
 	char filepath[ISFS_MAXPATH];
@@ -122,7 +128,7 @@ int DownloadOriginalTheme() {
 	mbedtls_aes_context title = {};
 	aeskey iv = { 0x00, 0x01 };
 
-	puts("Downloading original theme.");
+	if (!silent) puts("Downloading original theme.");
 
 	void* buffer = memalign32(fsize);
 	if (!buffer) {
@@ -138,7 +144,7 @@ int DownloadOriginalTheme() {
 
 	ret = FAT_Read(filepath, buffer, fsize, NULL);
 	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) {
-		printf("Already downloaded. Look for the %s file.\n", filepath);
+		if (!silent) printf("Already saved. Look for the %s file.\n", filepath);
 		goto finish;
 	}
 
@@ -167,15 +173,17 @@ int DownloadOriginalTheme() {
 	free(download.ptr);
 
 save:
-	puts("Saving...");
-	ret = FAT_Write(filepath, buffer, fsize, progressbar);
-	if (ret < 0)
-		perror("Failed to save");
-	else
-		printf("Saved to %s.\n", filepath);
+	if (!silent || FAT_GetFileSize(filepath, NULL) < 0) {
+		puts("Saving...");
+		ret = FAT_Write(filepath, buffer, fsize, progressbar);
+		if (ret < 0)
+			perror("Failed to save original theme");
+		else
+			printf("Saved original theme to %s.\n", filepath);
+	}
 
 finish:
 	free(buffer);
-	sleep(4);
+	sleep(3);
 	return ret;
 }

@@ -1,7 +1,5 @@
 #include <stdbool.h>
 
-bool mountSD();
-void unmountSD();
-
-bool mountUSB();
-void unmountUSB();
+bool FATMount();
+void FATUnmount();
+const char* GetActiveDeviceName();

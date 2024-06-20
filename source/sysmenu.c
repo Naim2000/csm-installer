@@ -1,5 +1,3 @@
-#include "sysmenu.h"
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -14,11 +12,14 @@
 #include "fs.h"
 #include "crypto.h"
 #include "malloc.h"
+#include "sysmenu.h"
+#include "theme.h"
 
 static const char u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
 
 static aeskey sm_titleKey = {};
 static bool is_vWii = false;
+static ThemeBase sm_platform = 0;
 static bool priiloader = false;
 static tmd sm_tmd = {};
 static tmd_content sm_archive = {};
@@ -201,8 +202,16 @@ int sysmenu_process() {
 	}
 
 	tik* p_tik = SIGNATURE_PAYLOAD(buffer);
-	if (p_tik->reserved[0xb] == 0x02)
+	if (p_tik->reserved[0xb] == 0x02) {
+		sm_platform = (ThemeBase)vWii;
 		is_vWii = true;
+	}
+	else if ((rev & 0xfff0) == 0x1200) {
+		sm_platform = (ThemeBase)Mini;
+	}
+	else {
+		sm_platform = (ThemeBase)Wii;
+	}
 
 	GetTitleKey(p_tik, sm_titleKey);
 
@@ -224,3 +233,4 @@ uint16_t getSmVersion() { return sm_tmd.title_version; }
 bool isArchive(sha1 hash) { return memcmp(sm_archive.hash, hash, sizeof(sha1)) == 0; }
 char getSmRegion() { return _getSMRegion(sm_tmd.title_version); }
 char getSmVersionMajor() { return _getSMVersionMajor(sm_tmd.title_version); }
+char getSmPlatform() { return sm_platform; }

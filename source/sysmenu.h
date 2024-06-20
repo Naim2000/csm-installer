@@ -15,3 +15,4 @@ bool isArchive(sha1);
 uint16_t getSmVersion();
 char getSmVersionMajor();
 char getSmRegion();
+char getSmPlatform();

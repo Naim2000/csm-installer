@@ -3,3 +3,4 @@
 
 void init_video();
 void clear();
+void clearln();
