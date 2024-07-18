@@ -17,7 +17,7 @@ include $(DEVKITPPC)/wii_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	csm-installer
 BUILD		:=	build
-SOURCES		:=	source
+SOURCES		:=	source source/43db
 DATA		:=	data
 INCLUDES	:=
 

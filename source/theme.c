@@ -16,15 +16,16 @@
 #include "fs.h"
 #include "network.h"
 
+#include "43db/u8.h"
+#include "43db/ardb.h"
+
 static const char
 	wiithemer_sig[] = "wiithemer",
 	binary_path_search[] = "C:\\Revolution\\ipl\\System",
 	binary_path_search_2[] = "D:\\Compat_irdrepo\\ipl\\Compat",
 	binary_path_search_3[] = "c:\\home\\neceCheck\\WiiMenu\\ipl\\bin\\RVL\\Final_", // What
-	binary_path_fmt12[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c",
-	u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
+	binary_path_fmt12[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c";
 
-// ?
 extern void* memmem(const void* haystack, size_t haystack_len, const void* needle, size_t needle_len);
 
 SignatureLevel SignedTheme(const void* buffer, size_t length) {
@@ -69,15 +70,45 @@ version_t GetThemeVersion(const void* buffer, size_t length) {
 	return (version_t) { base, major, minor, rgn };
 }
 
-int InstallTheme(const void* buffer, size_t size) {
+static uint32_t filter_ardb(AspectRatioDatabase* ardb, bool (*filter)(uint32_t))
+{
+	if (!ardb || !filter) return 0;
+
+	uint32_t temp[ardb->entry_count];
+	uint32_t* out_ptr = temp;
+	int filtered = 0;
+
+
+	for (uint32_t* entry = ardb->entries; entry < ardb->entries + ardb->entry_count; entry++)
+		if (filter(*entry))
+			*out_ptr++ = *entry;
+		else
+			filtered++;
+
+	while (out_ptr < temp + ardb->entry_count)
+		*out_ptr++ = 0x5A5A5A00; // ZZZ\x00
+
+	memcpy(ardb->entries, temp, sizeof(uint32_t) * ardb->entry_count);
+	ardb->entry_count -= filtered;
+	return filtered;
+}
+
+static bool ardb_filter_wc24(uint32_t entry) {
+	entry >>= 8;
+	return (entry != 0x48414A && entry != 0x484150); // HAJx, HAPx
+}
+
+int InstallTheme(void* buffer, size_t size, int dbpatching) {
+	U8Context ctx = {};
+
 	if (memcmp(buffer, "PK", 2) == 0) {
 		puts("\x1b[31;1mPlease do not rename .mym files.\x1b[39m\n"
 			"Follow https://wii.hacks.guide/themes to properly convert it."
 		);
 		return -EINVAL;
 	}
-	else if (memcmp(buffer, u8_header, sizeof(u8_header)) != 0) {
-		puts("\x1b[31;1mNot a theme!\x1b[39m");
+	else if (!u8ContextInit(buffer, &ctx)) {
+		puts("u8ContextInit() failed, is this really a theme?");
 		return -EINVAL;
 	}
 
@@ -107,6 +138,25 @@ int InstallTheme(const void* buffer, size_t size) {
 			break;
 	}
 
+	if (themeversion.base == vWii && dbpatching) do
+	{
+		U8Node* wwdb = NULL;
+		AspectRatioDatabase* ardb = NULL;
+
+		puts("Patching WiiWare 4:3 database...");
+
+		if (!(wwdb = u8GetFileNodeByPath(&ctx, "/titlelist/wwdb.bin", NULL)))
+		{
+			puts("Failed to find /titlelist/wwdb.bin in archive?");
+			break;
+		}
+
+		ardb = (AspectRatioDatabase*)(buffer + wwdb->data_offset);
+		filter_ardb(ardb, ardb_filter_wc24);
+	} while (0);
+
+	u8ContextFree(&ctx);
+
 	char filepath[ISFS_MAXPATH] = {};
 	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
 	printf("%s\n", filepath);
@@ -119,7 +169,7 @@ int InstallTheme(const void* buffer, size_t size) {
 	return 0;
 }
 
-int DownloadOriginalTheme(bool silent) {
+int DownloadOriginalTheme() {
 	int ret;
 	char url[0x80] = "http://nus.cdn.shop.wii.com/ccs/download/";
 	char filepath[ISFS_MAXPATH];
@@ -128,7 +178,7 @@ int DownloadOriginalTheme(bool silent) {
 	mbedtls_aes_context title = {};
 	aeskey iv = { 0x00, 0x01 };
 
-	if (!silent) puts("Downloading original theme.");
+	puts("Downloading original theme.");
 
 	void* buffer = memalign32(fsize);
 	if (!buffer) {
@@ -144,7 +194,7 @@ int DownloadOriginalTheme(bool silent) {
 
 	ret = FAT_Read(filepath, buffer, fsize, NULL);
 	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) {
-		if (!silent) printf("Already saved. Look for the %s file.\n", filepath);
+		printf("Already saved. Look for the %s file.\n", filepath);
 		goto finish;
 	}
 
@@ -172,18 +222,21 @@ int DownloadOriginalTheme(bool silent) {
 	mbedtls_aes_crypt_cbc(&title, MBEDTLS_AES_DECRYPT, download.size, iv, download.ptr, buffer);
 	free(download.ptr);
 
-save:
-	if (!silent || FAT_GetFileSize(filepath, NULL) < 0) {
-		puts("Saving...");
-		ret = FAT_Write(filepath, buffer, fsize, progressbar);
-		if (ret < 0)
-			perror("Failed to save original theme");
-		else
-			printf("Saved original theme to %s.\n", filepath);
+	if (SignedTheme(buffer, fsize) != default_theme) {
+		puts("Decryption failed?? (hash mismatch)");
+		goto finish;
 	}
+
+save:
+	puts("Saving...");
+	ret = FAT_Write(filepath, buffer, fsize, progressbar);
+	if (ret < 0)
+		perror("Failed to save original theme");
+	else
+		printf("Saved original theme to %s.\n", filepath);
 
 finish:
 	free(buffer);
-	sleep(3);
+	network_deinit();
 	return ret;
 }

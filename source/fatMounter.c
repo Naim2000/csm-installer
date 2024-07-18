@@ -96,7 +96,7 @@ bool FATMount() {
 		target->mounted = false;
 		target->disk->shutdown();
 	}
-	
+
 	return target->mounted;
 }
 

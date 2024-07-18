@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <ogc/isfs.h>
 #include <fat.h>
@@ -45,16 +46,14 @@ int NAND_GetFileSize(const char* filepath, size_t* size) {
 }
 
 int FAT_GetFileSize(const char* filepath, size_t* size) {
-	FILE* fp = fopen(filepath, "rb");
-	if (!fp)
+	struct stat st[1];
+
+	if (stat(filepath, st))
 		return -errno;
 
-	if (size) {
-		fseek(fp, 0, SEEK_END);
-		*size = ftell(fp);
-	}
+	if (size)
+		*size = st->st_size;
 
-	fclose(fp);
 	return 0;
 }
 

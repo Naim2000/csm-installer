@@ -164,7 +164,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 	static char line[0x80];
 
 	CON_GetMetrics(&conX, &conY);
-	memset(line, 0xc4, conX); // from d2x cIOS installer
+	memset(line, 0xc4, conX);
 	line[conX] = 0;
 	max = conY - 6; // 3 lines for the top and 3 lines for the bottom
 

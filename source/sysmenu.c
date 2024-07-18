@@ -206,7 +206,7 @@ int sysmenu_process() {
 		sm_platform = (ThemeBase)vWii;
 		is_vWii = true;
 	}
-	else if ((rev & 0xfff0) == 0x1200) {
+	else if ((rev & 0xFFF0) == 0x1200) {
 		sm_platform = (ThemeBase)Mini;
 	}
 	else {

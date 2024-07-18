@@ -43,9 +43,9 @@ void init_video() {
 	VIDEO_WaitVSync();
 
 	// Initialise the console
-	CON_Init(xfb, (vmode.viWidth + vmode.viXOrigin - CONSOLE_WIDTH) / 2,
-             (vmode.viHeight + vmode.viYOrigin - CONSOLE_HEIGHT) / 2,
-             CONSOLE_WIDTH, CONSOLE_HEIGHT, vmode.fbWidth * VI_DISPLAY_PIX_SZ);
+	CON_InitEx(&vmode, (vmode.viWidth + vmode.viXOrigin - CONSOLE_WIDTH) / 2,
+					   (vmode.viHeight + vmode.viYOrigin - CONSOLE_HEIGHT) / 2,
+					   CONSOLE_WIDTH, CONSOLE_HEIGHT);
 	CON_GetMetrics(&conX, &conY);
 
 	VIDEO_ClearFrameBuffer(&vmode, xfb, COLOR_BLACK);
@@ -59,8 +59,8 @@ void init_video() {
 
 void clear() {
 	VIDEO_WaitVSync();
-	VIDEO_ClearFrameBuffer(&vmode, xfb, COLOR_BLACK);
-	printf("%s", "\x1b[0;0H");
+//	VIDEO_ClearFrameBuffer(&vmode, xfb, COLOR_BLACK);
+	printf("%s", "\x1b[2J");
 }
 
 void clearln() {

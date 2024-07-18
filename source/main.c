@@ -13,6 +13,7 @@
 #include "fs.h"
 #include "fatMounter.h"
 #include "directory.h"
+#include "menu.h"
 #include "sysmenu.h"
 #include "theme.h"
 #include "network.h"
@@ -22,134 +23,147 @@ void OSReport(const char* fmt, ...) {}
 
 extern void __exception_setreload(int);
 
+static int ww43dbmode = 0, brickprotection = 0;
+
 bool isCSMfile(const char* name) {
 	return hasFileExtension(name, "csm") || hasFileExtension(name, "app");
 }
 
-int main(int argc, char* argv[]) {
-	int ret;
-	char* file = NULL;
+int SelectTheme() {
+	const char* file = NULL;
+	size_t fsize = 0;
 	void* buffer = NULL;
-	size_t size = 0;
-	int restore = 0;
 
-	__exception_setreload(10);
+	file = SelectFileMenu("Select a .csm or .app file.", "themes", isCSMfile);
+	clear();
 
-	if (argc) {
-		for (int i = 0; i < argc; i++) {
-			char* arg = argv[i];
-
-			if (arg[0] != '-' && arg[0] != '/')
-				continue;
-
-			switch(arg[1]) {
-				case 'i':
-					file = (arg[2] == ':' || arg[2] == '=')?
-						arg + 3 :
-						argv[++i];
-					break;
-				case 'r':
-					restore++;
-					break;
-			}
-		}
+	if (!file) {
+		perror("SelectFileMenu failed");
+		return -errno;
 	}
 
-	puts(
-		"Loading...\n"
-		"Hold + to restore original theme!"
-		"	\x1b[30;1m(timing untested with real Wii Remote)\x1b[39m");
+	printf("\n%s\n\n", file);
+
+	if (FAT_GetFileSize(file, &fsize) < 0) {
+		perror("FAT_GetFileSize failed");
+		return -errno;
+	}
+
+	printf("File size: %.2fMB\n\n", fsize / (float)(1 << 20));
+
+	printf("Press +/START to install.\n"
+			"Press any other button to cancel.\n\n");
+
+	if (!(wait_button(0) & WPAD_BUTTON_PLUS))
+		return -ECANCELED;
+
+	buffer = memalign32(fsize);
+	if (!buffer) {
+		printf("No memory..? (failed to allocate %u bytes)\n", fsize);
+		return -ENOMEM;
+	}
+
+	int ret = FAT_Read(file, buffer, fsize, progressbar);
+	if (ret < 0) {
+		perror("FAT_Read failed");
+		goto finish;
+	}
+
+	ret = InstallTheme(buffer, fsize, ww43dbmode == 0);
+
+finish:
+	free(buffer);
+	return ret;
+}
+
+static SettingsItem settings[] = {
+	{
+		.name = "(vWii) 43DB fix for WiiConnect24 channels",
+		.options = (const char*[]){ "Enabled", "Disabled" },
+		.count = 2,
+		.selected = &ww43dbmode
+	},
+
+	{
+		.name = "Brick Protection",
+		.options = (const char*[]){ "Enabled", "Active", "Yes", "On", "Offn't" },
+		.count = 5,
+		.selected = &brickprotection
+	}
+};
+
+int options(void)
+{
+	SettingsMenu(settings, 2);
+	return 0;
+}
+
+static MainMenuItem items[] = {
+	{
+		.name = "Install a theme",
+		.action = SelectTheme,
+		.pause = true
+	},
+
+	{
+		.name = "Download base theme",
+		.action = DownloadOriginalTheme,
+		.heading = true,
+		.pause = true
+	},
+
+	{
+		.name = "Options",
+		.action = options
+	},
+
+	{
+		.name = "Exit"
+	}
+};
+
+int main() {
+	__exception_setreload(10);
+
+	puts("Loading...");
 
 	if (!patch_ahbprot_reset() || !patch_isfs_permissions()) {
 		printf("\x1b[30;1mHW_AHBPROT: %08X\x1b[39m\n", *((volatile uint32_t*)0xcd800064));
-		puts("failed to apply IOS patches! Exiting in 5s...");
+		puts("failed to apply IOS patches!\n"
+			 "Please make sure that you are running this app on HBC v1.0.8 or later,\n"
+			 "and that <ahb_access/> is under the <app> node in meta.xml!\n\n"
+
+			 "Exiting in 5 seconds..."
+		);
 		sleep(5);
+		return *((volatile uint32_t*)0xcd800064);
 	}
 
 	initpads();
 	ISFS_Initialize();
 
 	if (sysmenu_process() < 0)
-		goto error;
-
-	sleep(2);
-	scanpads();
-	if (buttons_down(WPAD_BUTTON_PLUS)) {
-		puts("\x1b[30;1mReady to redownload original theme\x1b[39m");
-		restore++;
-	}
+		goto exit;
 
 	if (!FATMount()) {
 		puts("Unable to mount a storage device...");
-		goto error;
+		goto exit;
 	}
-
-	if (restore || (getSmPlatform() == (ThemeBase)Mini))
-		DownloadOriginalTheme(getSmPlatform() == (ThemeBase)Mini);
 
 	if (!hasPriiloader()) {
 		printf("\x1b[30;1mPlease install Priiloader..!\x1b[39m\n\n");
 		sleep(1);
 
+		if (getSmPlatform() == Mini) // There's nooooooooo way you're doing this on Mini with no Priiloader. Illegal
+			goto exit;
+
 		puts("Press A to continue.");
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	if (file)
-		goto install;
+	MainMenu(items, 4);
 
-	for (;;) {
-		file = SelectFileMenu("Select a .csm or .app file.", "themes", isCSMfile);
-		clear();
-
-		if (!file) {
-			perror("SelectFileMenu failed");
-			goto error;
-		}
-
-		printf("\n%s\n\n", file);
-
-		if (FAT_GetFileSize(file, &size) < 0) {
-			perror("FAT_GetFileSize failed");
-			sleep(2);
-			continue;
-		}
-
-		printf("File size: %.2fMB\n\n", size / (float)0x100000);
-
-		printf("Press +/START to install.\n"
-				"Press any other button to cancel.\n\n");
-
-		if (wait_button(WPAD_BUTTON_PLUS))
-			break;
-
-		size = 0;
-	}
-
-install:
-
-	if (FAT_GetFileSize(file, &size) < 0) {
-		perror("FAT_GetFileSize failed");
-		goto error;
-	}
-
-	buffer = memalign32(size);
-	if (!buffer) {
-		printf("No memory..? (failed to allocate %u bytes)\n", size);
-		goto error;
-	}
-
-	ret = FAT_Read(file, buffer, size, progressbar);
-	if (ret < 0) {
-		perror("FAT_Read failed");
-		goto error;
-	}
-
-	InstallTheme(buffer, size);
-
-error:
-	free(buffer);
-	network_deinit();
+exit:
 	ISFS_Deinitialize();
 	FATUnmount();
 	puts("Press HOME to exit.");

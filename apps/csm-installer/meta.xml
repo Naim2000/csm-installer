@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <app version="1">
 	<name>csm-installer</name>
-	<version>1.0</version>
+	<version>1.4</version>
 	<release_date>20231126000000</release_date>
 	<coder>thepikachugamer</coder>
 	<short_description>Wii menu theme installer.</short_description>
