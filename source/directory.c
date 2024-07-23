@@ -229,7 +229,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 
 				break;
 			}
-			else if (buttons & (WPAD_BUTTON_A | WPAD_BUTTON_RIGHT)) {
+			else if (buttons & WPAD_BUTTON_A) {
 				if (entry->flags & 0x80) {
 					goBack(cwd);
 					GetDirectoryEntries(cwd, &entries, &cnt, filter);
@@ -250,7 +250,7 @@ char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter f
 				}
 				break;
 			}
-			else if (buttons & (WPAD_BUTTON_B | WPAD_BUTTON_LEFT)) {
+			else if (buttons & WPAD_BUTTON_B) {
 				if (!goBack(cwd)) {
 					errno = ECANCELED;
 					free(entries);
