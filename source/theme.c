@@ -98,6 +98,33 @@ static bool ardb_filter_wc24(uint32_t entry) {
 	return (entry != 0x48414A && entry != 0x484150); // HAJx, HAPx
 }
 
+static int WriteThemeFile(void* buffer, size_t fsize) {
+	char filepath[ISFS_MAXPATH] = {};
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
+	printf("%s\n", filepath);
+	int ret = NAND_Write(filepath, buffer, fsize, progressbar);
+	if (ret < 0)
+		printf("error! (%d)\n", ret);
+
+	return ret;
+}
+
+static int PatchTheme43DB(U8Context* ctx) {
+	U8Node* wwdb = NULL;
+	AspectRatioDatabase* ardb = NULL;
+
+	puts("Patching WiiWare 4:3 database...");
+
+	if (!(wwdb = u8GetFileNodeByPath(ctx, "/titlelist/wwdb.bin", NULL)))
+	{
+		puts("Failed to find /titlelist/wwdb.bin in archive?");
+		return 0;
+	}
+
+	ardb = (AspectRatioDatabase*)(ctx->u8_buf + wwdb->data_offset);
+	return filter_ardb(ardb, ardb_filter_wc24);
+}
+
 int InstallTheme(void* buffer, size_t size, int dbpatching) {
 	U8Context ctx = {};
 
@@ -138,35 +165,12 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 			break;
 	}
 
-	if (themeversion.base == vWii && dbpatching) do
-	{
-		U8Node* wwdb = NULL;
-		AspectRatioDatabase* ardb = NULL;
-
-		puts("Patching WiiWare 4:3 database...");
-
-		if (!(wwdb = u8GetFileNodeByPath(&ctx, "/titlelist/wwdb.bin", NULL)))
-		{
-			puts("Failed to find /titlelist/wwdb.bin in archive?");
-			break;
-		}
-
-		ardb = (AspectRatioDatabase*)(buffer + wwdb->data_offset);
-		filter_ardb(ardb, ardb_filter_wc24);
-	} while (0);
+	if (themeversion.base == vWii && dbpatching)
+		PatchTheme43DB(&ctx);
 
 	u8ContextFree(&ctx);
 
-	char filepath[ISFS_MAXPATH] = {};
-	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
-	printf("%s\n", filepath);
-	int ret = NAND_Write(filepath, buffer, size, progressbar);
-	if (ret < 0) {
-		printf("error! (%d)\n", ret);
-		return ret;
-	}
-
-	return 0;
+	return WriteThemeFile(buffer, size);
 }
 
 int DownloadOriginalTheme() {
@@ -239,4 +243,52 @@ finish:
 	free(buffer);
 	network_deinit();
 	return ret;
+}
+
+int PatchThemeInPlace(void) {
+	int ret;
+	char filepath[ISFS_MAXPATH];
+	size_t fsize;
+	U8Context ctx = {};
+
+	if (getSmPlatform() != vWii) {
+		puts("This option is only for vWii (Wii U).");
+		return 0;
+	}
+
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
+
+	ret = NAND_GetFileSize(filepath, &fsize);
+	if (ret < 0) {
+		printf("NAND_GetFileSize failed? (%i)\n", ret);
+		return ret;
+	}
+
+	void* buffer = memalign32(fsize);
+	if (!buffer) {
+		printf("No memory...??? (failed to allocate %u bytes)\n", fsize);
+		return -ENOMEM;
+	}
+
+	ret = NAND_Read(filepath, buffer, fsize, progressbar);
+	if (ret < 0) {
+		printf("error! (%i)\n", ret);
+		goto finish;
+	}
+
+	if (!u8ContextInit(buffer, &ctx)) {
+		puts("u8ContentInit() failed? What?");
+		goto finish;
+	}
+
+	if (PatchTheme43DB(&ctx))
+		ret = WriteThemeFile(buffer, fsize);
+	else
+		puts("PatchTheme43DB() returned 0, nothing to do.");
+
+finish:
+	u8ContextFree(&ctx);
+	free(buffer);
+	return ret;
+
 }

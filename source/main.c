@@ -106,6 +106,13 @@ static MainMenuItem items[] = {
 	},
 
 	{
+		.name = "(vWii) Patch 4:3 database in current theme",
+		.action = PatchThemeInPlace,
+		.heading = true,
+		.pause = true
+	},
+
+	{
 		.name = "Download base theme",
 		.action = DownloadOriginalTheme,
 		.heading = true,
@@ -161,7 +168,7 @@ int main() {
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	MainMenu(items, 4);
+	MainMenu(items, 5);
 
 exit:
 	ISFS_Deinitialize();
