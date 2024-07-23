@@ -106,7 +106,7 @@ static MainMenuItem items[] = {
 	},
 
 	{
-		.name = "(vWii) Patch 4:3 database in current theme",
+		.name = "(vWii) Apply 43DB fix to current theme",
 		.action = PatchThemeInPlace,
 		.heading = true,
 		.pause = true

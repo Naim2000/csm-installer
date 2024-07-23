@@ -284,7 +284,7 @@ int PatchThemeInPlace(void) {
 	if (PatchTheme43DB(&ctx))
 		ret = WriteThemeFile(buffer, fsize);
 	else
-		puts("PatchTheme43DB() returned 0, nothing to do.");
+		puts("PatchTheme43DB() returned 0, did you already patch it?");
 
 finish:
 	u8ContextFree(&ctx);
