@@ -138,8 +138,35 @@ int NAND_Write(const char* filepath, const void* buffer, size_t filesize, RWCall
 
 int FAT_Write(const char* filepath, const void* buffer, size_t filesize, RWCallback callback) {
 	FILE* fp = fopen(filepath, "wb");
-	if (!fp)
-		return -errno;
+	if (!fp) {
+		if (errno == ENOTDIR) {
+			char* workpath = strdup(filepath);
+			if (!workpath) // !?!?
+				return -errno;
+
+			char* ptr = strchr(workpath, '/');
+			int ret;
+			while ((ptr = strchr(ptr, '/')))
+			{
+				*ptr = 0;
+			//	printf("mkdir(%s)\n", workpath);
+				ret = mkdir(workpath, 0644);
+				*ptr = '/';
+
+				if (ret == -1 && errno != EEXIST)
+					break;
+
+				ret = 0;
+				ptr++;
+			}
+
+			free(workpath);
+			if (ret != 0 || !(fp = fopen(filepath, "wb")))
+				return -errno;
+		}
+		else
+			return -errno;
+	}
 
 	size_t wrote = 0;
 	while (wrote < filesize) {

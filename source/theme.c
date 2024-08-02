@@ -14,6 +14,7 @@
 #include "malloc.h"
 #include "sysmenu.h"
 #include "fs.h"
+#include "fatMounter.h"
 #include "network.h"
 
 #include "43db/u8.h"
@@ -32,7 +33,7 @@ SignatureLevel SignedTheme(const void* buffer, size_t length) {
 	sha1 hash = {};
 	mbedtls_sha1_ret(buffer, length, hash);
 
-	if (isArchive(hash))
+	if (!memcmp(hash, sysmenu->archive.hash, sizeof(sha1)))
 		return default_theme;
 	else if (memmem(buffer, length, wiithemer_sig, strlen(wiithemer_sig)))
 		return wiithemer_signed;
@@ -86,7 +87,8 @@ static uint32_t filter_ardb(AspectRatioDatabase* ardb, bool (*filter)(uint32_t))
 			filtered++;
 
 	while (out_ptr < temp + ardb->entry_count)
-		*out_ptr++ = 0x5A5A5A00; // ZZZ\x00
+		// *out_ptr++ = 0x5A5A5A00; // ZZZ\x00
+		*out_ptr++ = 0;
 
 	memcpy(ardb->entries, temp, sizeof(uint32_t) * ardb->entry_count);
 	ardb->entry_count -= filtered;
@@ -100,7 +102,7 @@ static bool ardb_filter_wc24(uint32_t entry) {
 
 static int WriteThemeFile(void* buffer, size_t fsize) {
 	char filepath[ISFS_MAXPATH] = {};
-	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
 	printf("%s\n", filepath);
 	int ret = NAND_Write(filepath, buffer, fsize, progressbar);
 	if (ret < 0)
@@ -111,18 +113,27 @@ static int WriteThemeFile(void* buffer, size_t fsize) {
 
 static int PatchTheme43DB(U8Context* ctx) {
 	U8Node* wwdb = NULL;
+	uint32_t wwdb_index;
 	AspectRatioDatabase* ardb = NULL;
 
 	puts("Patching WiiWare 4:3 database...");
 
-	if (!(wwdb = u8GetFileNodeByPath(ctx, "/titlelist/wwdb.bin", NULL)))
+	if (!(wwdb = u8GetFileNodeByPath(ctx, "/titlelist/wwdb.bin", &wwdb_index)))
 	{
 		puts("Failed to find /titlelist/wwdb.bin in archive?");
 		return 0;
 	}
 
 	ardb = (AspectRatioDatabase*)(ctx->u8_buf + wwdb->data_offset);
-	return filter_ardb(ardb, ardb_filter_wc24);
+	uint32_t filtered = filter_ardb(ardb, ardb_filter_wc24);
+
+	if (filtered) {
+		// Find the real location of the node
+		U8Node* nodes = (U8Node*)(ctx->u8_buf + ctx->u8_header.root_node_offset);
+		nodes[wwdb_index].size -= (filtered * sizeof(uint32_t));
+	}
+
+	return filtered;
 }
 
 int InstallTheme(void* buffer, size_t size, int dbpatching) {
@@ -140,11 +151,11 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 	}
 
 	version_t themeversion = GetThemeVersion(buffer, size);
-	if (themeversion.region != getSmRegion() || themeversion.major != getSmVersionMajor() || themeversion.base != getSmPlatform()) {
+	if (themeversion.region != sysmenu->region || themeversion.major != sysmenu->versionMajor || themeversion.base != sysmenu->platform) {
 		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\n"
 			   "Theme version : %c %c.X%c\n"
-			   "System version: %c %c.X%c\n", themeversion.base, themeversion.major,  themeversion.region,
-											  getSmPlatform(),   getSmVersionMajor(), getSmRegion());
+			   "System version: %c %c.X%c\n", themeversion.base, themeversion.major,   themeversion.region,
+											  sysmenu->platform, sysmenu->versionMajor, sysmenu->region);
 		return -EINVAL;
 	}
 
@@ -158,7 +169,7 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 
 		default:
 			puts("\x1b[30;1mThis theme isn't signed...\x1b[39m");
-			if (!hasPriiloader()) {
+			if (!sysmenu->hasPriiloader) {
 				puts("Consider installing Priiloader before installing unsigned themes.");
 				return -EPERM;
 			}
@@ -175,9 +186,9 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 
 int DownloadOriginalTheme() {
 	int ret;
-	char url[0x80] = "http://nus.cdn.shop.wii.com/ccs/download/";
+	char url[192] = "http://nus.cdn.shop.wii.com/ccs/download/";
 	char filepath[ISFS_MAXPATH];
-	size_t fsize = getArchiveSize();
+	size_t fsize = sysmenu->archive.size;
 	blob download = {};
 	mbedtls_aes_context title = {};
 	aeskey iv = { 0x00, 0x01 };
@@ -190,15 +201,15 @@ int DownloadOriginalTheme() {
 		return -ENOMEM;
 	}
 
-	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
 	ret = NAND_Read(filepath, buffer, fsize, NULL);
 
-	sprintf(filepath, "%08x-v%hu.app", getArchiveCid(), getSmVersion());
+	sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version);
 	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) goto save;
 
 	ret = FAT_Read(filepath, buffer, fsize, NULL);
 	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) {
-		printf("Already saved. Look for the %s file.\n", filepath);
+		printf("Already saved. Look for '%s'\n", filepath);
 		goto finish;
 	}
 
@@ -210,7 +221,8 @@ int DownloadOriginalTheme() {
 	}
 
 	puts("Downloading...");
-	sprintf(strrchr(url, '/'), "/%016llx/%08x", getSmNUSTitleID(), getArchiveCid());
+	uint64_t titleID = sysmenu->isvWii ? 0x0000000700000002LL : 0x0000000100000002LL;
+	sprintf(strrchr(url, '/'), "/%016llx/%08x", titleID, sysmenu->archive.cid);
 	ret = DownloadFile(url, &download);
 	if (ret != 0) {
 		printf(
@@ -222,7 +234,7 @@ int DownloadOriginalTheme() {
 	}
 
 	puts("Decrypting...");
-	mbedtls_aes_setkey_dec(&title, getSmTitleKey(), 128);
+	mbedtls_aes_setkey_dec(&title, sysmenu->titlekey, 128);
 	mbedtls_aes_crypt_cbc(&title, MBEDTLS_AES_DECRYPT, download.size, iv, download.ptr, buffer);
 	free(download.ptr);
 
@@ -237,11 +249,58 @@ save:
 	if (ret < 0)
 		perror("Failed to save original theme");
 	else
-		printf("Saved original theme to %s.\n", filepath);
+		printf("Saved original theme to '%s'.\n", filepath);
 
 finish:
 	free(buffer);
-	network_deinit();
+//	network_deinit();
+	return ret;
+}
+
+int SaveCurrentTheme(void) {
+	int ret;
+	char filepath[256];
+	size_t fsize;
+	sha1 hash = {};
+
+	snprintf(filepath, ISFS_MAXPATH, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
+
+	ret = NAND_GetFileSize(filepath, &fsize);
+	if (ret < 0) {
+		printf("NAND_GetFileSize failed? (%i)\n", ret);
+		return ret;
+	}
+
+	void* buffer = memalign32(fsize);
+	if (!buffer) {
+		printf("No memory...??? (failed to allocate %u bytes)\n", fsize);
+		return -ENOMEM;
+	}
+
+	puts(filepath);
+	ret = NAND_Read(filepath, buffer, fsize, progressbar);
+	if (ret < 0) {
+		printf("error! (%i)\n", ret);
+		goto finish;
+	}
+
+	mbedtls_sha1_ret(buffer, fsize, hash);
+	if (!memcmp(hash, sysmenu->archive.hash, sizeof(sha1))) {
+		sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version);
+	}
+	else {
+		uint32_t* hashptr = (uint32_t*)hash;
+
+		sprintf(filepath, "%s:/themes/%08x-v%hu_%08x%08x.csm", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version, hashptr[0], hashptr[1]);
+	}
+
+	printf("Saving to %s\n", filepath);
+	ret = FAT_Write(filepath, buffer, fsize, progressbar);
+	if (ret < 0)
+		perror("Failed to save");
+
+finish:
+	free(buffer);
 	return ret;
 }
 
@@ -251,12 +310,12 @@ int PatchThemeInPlace(void) {
 	size_t fsize;
 	U8Context ctx = {};
 
-	if (getSmPlatform() != vWii) {
-		puts("This option is only for vWii (Wii U).");
+	if (sysmenu->platform != vWii) {
+		puts("This option is for vWii (Wii U) only.");
 		return 0;
 	}
 
-	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", getArchiveCid());
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
 
 	ret = NAND_GetFileSize(filepath, &fsize);
 	if (ret < 0) {
