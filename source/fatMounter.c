@@ -14,41 +14,68 @@ typedef struct {
 	const char* friendlyName;
 	const char* name;
 	const DISC_INTERFACE* disk;
-	long mounted;
+	int mounted;
 } FATDevice;
 
-#define NUM_DEVICES 2
-static FATDevice devices[NUM_DEVICES] = {
-	{ "SD card slot",				"sd",	&__io_wiisd },
-	{ "USB mass storage device",	"usb",	&__io_usbstorage},
+static FATDevice devices[] = {
+	{
+		.friendlyName = "SD card slot",
+		.name         = "sd",
+		.disk         = &__io_wiisd
+	},
+
+	{
+		.friendlyName = "USB mass storage device",
+		.name         = "usb",
+		.disk         = &__io_usbstorage
+	},
 };
+#define NUM_DEVICES (sizeof(devices) / sizeof(FATDevice))
 
 static FATDevice* active = NULL;
+
+static void FATSetDefault(FATDevice* dev) {
+	char driveroot[10];
+
+	active = dev;
+	sprintf(driveroot, "%s:/", dev->name);
+	chdir(driveroot);
+}
+
+static bool FATMountDevice(FATDevice* dev) {
+	printf ("[*]	Mounting '%s' ... ", dev->friendlyName);
+
+	if ((dev->mounted = fatMountSimple(dev->name, dev->disk)))
+		puts("OK!");
+	else
+		puts("Failed!");
+
+
+	return dev->mounted;
+}
 
 bool FATMount() {
 	FATDevice* attached[NUM_DEVICES] = {};
 	int i = 0;
 
-	for (int ii = 0; ii < NUM_DEVICES; ii++) {
-		FATDevice* dev = devices + i;
-
+	// FATUnmount();
+	for (FATDevice* dev = devices; dev < devices + NUM_DEVICES; dev++) {
 		dev->disk->startup();
-		if (dev->disk->isInserted()) {
-			printf("[+]	Device detected:	\"%s\"\n", dev->friendlyName);
+		if (dev->disk->isInserted() && FATMountDevice(dev)) {
+		//	printf("[+]	Device detected:	\"%s\"\n", dev->friendlyName);
 			attached[i++] = dev;
 		}
-		else dev->disk->shutdown();
 	}
 
 	if (i == 0) {
-		puts("\x1b[30;1m[?]	No storage devices are attached.\x1b[39m");
+	//	puts("\x1b[30;1m[?]	No storage devices are attached.\x1b[39m");
 		return false;
 	}
 
 	FATDevice* target = NULL;
 	if (i == 1) target = attached[0];
 	else {
-		puts("[*]	Choose a device to mount.");
+		puts("[*]	Choose a device to use.");
 
 		int index = 0;
 		bool selected = false;
@@ -56,7 +83,7 @@ bool FATMount() {
 			clearln();
 			printf("[*]	Device: < %s >", attached[index]->friendlyName);
 
-			switch(wait_button(0))
+			switch (wait_button(0))
 			{
 				case WPAD_BUTTON_LEFT:
 					if (index) index -= 1;
@@ -81,29 +108,12 @@ bool FATMount() {
 
 	if (!target) return false;
 
-	printf ("[*]	Mounting %s ... ", target->name);
-	if (fatMountSimple(target->name, target->disk)) {
-		char driveroot[10];
-
-		printf("OK!\n\n");
-		target->mounted = true;
-		active = target;
-		sprintf(driveroot, "%s:/", target->name);
-		chdir(driveroot);
-	}
-	else {
-		printf("Failed!\n\n");
-		target->mounted = false;
-		target->disk->shutdown();
-	}
-
-	return target->mounted;
+	FATSetDefault(target);
+	return true;
 }
 
 void FATUnmount() {
-	for (int i = 0; i < NUM_DEVICES; i++) {
-		FATDevice* dev = devices + i;
-
+	for (FATDevice* dev = devices; dev < devices + NUM_DEVICES; dev++) {
 		if (dev->mounted) {
 			fatUnmount(dev->name);
 			dev->disk->shutdown();
@@ -114,5 +124,5 @@ void FATUnmount() {
 	active = NULL;
 }
 
-const char* GetActiveDeviceName() { return active? active->name : NULL; }
+const char* GetActiveDeviceName() { return active ? active->name : NULL; }
 
