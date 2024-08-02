@@ -26,20 +26,25 @@ extern void __exception_setreload(int);
 static int ww43dbmode = 0, brickprotection = 0;
 
 bool isCSMfile(const char* name) {
-	return hasFileExtension(name, "csm") || hasFileExtension(name, "app");
+	return hasFileExtension(name, ".csm") || hasFileExtension(name, ".app");
 }
 
 int SelectTheme() {
-	const char* file = NULL;
+	int ret;
+	char file[PATH_MAX] = {};
 	size_t fsize = 0;
 	void* buffer = NULL;
 
-	file = SelectFileMenu("Select a .csm or .app file.", "themes", isCSMfile);
+	ret = SelectFileMenu("Select a .csm or .app file.", "/themes", isCSMfile, file);
 	clear();
 
-	if (!file) {
+	if (ret) {
+	//	extern char cwd[];
+
+	//	printf("GetActiveDeviceName() => %p \"%s\"\n", GetActiveDeviceName(), GetActiveDeviceName());
+	//	printf("cwd => %p \"%s\"\n", cwd, cwd);
 		perror("SelectFileMenu failed");
-		return -errno;
+		return ret;
 	}
 
 	printf("\n%s\n\n", file);
@@ -63,7 +68,7 @@ int SelectTheme() {
 		return -ENOMEM;
 	}
 
-	int ret = FAT_Read(file, buffer, fsize, progressbar);
+	ret = FAT_Read(file, buffer, fsize, progressbar);
 	if (ret < 0) {
 		perror("FAT_Read failed");
 		goto finish;
@@ -106,10 +111,17 @@ static MainMenuItem items[] = {
 	},
 
 	{
-		.name = "(vWii) Apply 43DB fix to current theme",
+		.name = "Apply 43DB fix to current theme (vWii)",
 		.action = PatchThemeInPlace,
 		.heading = true,
 		.pause = true
+	},
+
+	{
+		.name = "Save current theme",
+		.action = SaveCurrentTheme,
+		.heading = true,
+		.pause = true,
 	},
 
 	{
@@ -135,7 +147,7 @@ int main() {
 	puts("Loading...");
 
 	if (!patch_ahbprot_reset() || !patch_isfs_permissions()) {
-		printf("\x1b[30;1mHW_AHBPROT: %08X\x1b[39m\n", *((volatile uint32_t*)0xcd800064));
+	//	printf("\x1b[30;1mHW_AHBPROT: %08X\x1b[39m\n", *((volatile uint32_t*)0xcd800064));
 		puts("failed to apply IOS patches!\n"
 			 "Please make sure that you are running this app on HBC v1.0.8 or later,\n"
 			 "and that <ahb_access/> is under the <app> node in meta.xml!\n\n"
@@ -150,31 +162,35 @@ int main() {
 	ISFS_Initialize();
 
 	if (sysmenu_process() < 0)
-		goto exit;
+		goto waitexit;
 
 	if (!FATMount()) {
 		puts("Unable to mount a storage device...");
-		goto exit;
+		goto waitexit;
 	}
 
-	if (!hasPriiloader()) {
+	if (!sysmenu->hasPriiloader) {
 		printf("\x1b[30;1mPlease install Priiloader..!\x1b[39m\n\n");
 		sleep(1);
 
-		if (getSmPlatform() == Mini) // There's nooooooooo way you're doing this on Mini with no Priiloader. Illegal
-			goto exit;
+		if (sysmenu->platform == Mini) // There's nooooooooo way you're doing this on Mini with no Priiloader. Illegal
+			goto waitexit;
 
 		puts("Press A to continue.");
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	MainMenu(items, 5);
+	MainMenu(items, 6);
 
 exit:
 	ISFS_Deinitialize();
 	FATUnmount();
-	puts("Press HOME to exit.");
-	wait_button(WPAD_BUTTON_HOME);
+	network_deinit();
 	WPAD_Shutdown();
 	return 0;
+
+waitexit:
+	puts("Press any button to exit.");
+	wait_button(0);
+	goto exit;
 }

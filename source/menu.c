@@ -68,7 +68,7 @@ void MainMenu(int argc; MainMenuItem argv[argc], int argc)
 				break;
 			}
 
-			case WPAD_BUTTON_B:
+		//	case WPAD_BUTTON_B:
 			case WPAD_BUTTON_HOME:
 			{
 				return;

@@ -47,13 +47,13 @@ static int xferinfo_cb(void* userp, curl_off_t dltotal, curl_off_t dlnow, curl_o
 		data->start = gettime();
 
 	uint64_t now = gettime();
-	uint32_t elapsed = diff_sec(data->start, now);
+	uint32_t elapsed = diff_msec(data->start, now);
 
-	double f_dlnow = (dlnow / 0x100000.p0);
-	double f_dltotal = (dltotal / 0x100000.p0);
+	float f_dlnow = (dlnow / 0x400.p0);
+	float f_dltotal = (dltotal / 0x400.p0);
 
-	printf("\r%.2f/%.2fMB // %.2f MB/s...    ",
-		   f_dlnow, f_dltotal, f_dlnow / elapsed);
+	printf("\r%.2f/%.2fKB // %.2f KB/s...    ",
+		   f_dlnow, f_dltotal, f_dlnow / ((float)elapsed / 1000));
 
 	return 0;
 }
