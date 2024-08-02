@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -17,20 +16,12 @@
 #include "fatMounter.h"
 
 struct entry {
-	u8 flags;
 	char name[NAME_MAX];
+	bool isdir;
 };
 
-static char cwd[PATH_MAX];
-
-static bool isDirectory(const char* path) {
-	struct stat statbuf;
-	stat(path, &statbuf);
-	return S_ISDIR(statbuf.st_mode) > 0;
-}
-
 static char* goBack(char* path) {
-	if(strchr(path, '/') == strrchr(path, '/'))
+	if (strchr(path, '/') == strrchr(path, '/'))
 		return NULL;
 
 	*strrchr(path, '/') = '\x00';
@@ -42,230 +33,190 @@ bool hasFileExtension(const char* name, const char* ext) {
 	if (!(name = strrchr(name, '.')))
 		return false;
 
-	return strcasecmp(name + 1, ext) == 0;
+	return !strcasecmp(name, ext);
+}
+
+static int entry_sort(const void* a_, const void* b_) {
+	const struct entry *a = a_, *b = b_;
+
+	if (a->isdir ^ b->isdir)
+		return b->isdir - a->isdir;
+
+	return strcasecmp(a->name, b->name);
 }
 
 static void PrintEntries(struct entry entries[], int start, int count, int max, int selected) {
+	int i = 0;
 	if (!count) {
 		printf("\t\x1b[30;1m[Nothing.]\x1b[39m");
-		return;
+	}
+	else {
+		for (i = 0; i < MIN(max, count); i++) {
+		printf("%2s	%s\n",
+			(start + i) == selected? ">>" : "",
+			entries[start + i].name);
+		}
 	}
 
-	for (int i = 0; i < MIN(max, count); i++)
-		printf("%s	%s\n",
-			   (start + i) == selected? ">>" : "",
-			   entries[start + i].name);
 
-}
-
-static int GetDirectoryEntryCount(DIR* pdir, FileFilter filter) {
-	int count = 0;
-	struct dirent* pent;
-
-	if (!pdir)
-		return 0;
-
-	while ( (pent = readdir(pdir)) != NULL ) {
-		if (!strcmp(pent->d_name, ".") || !strcmp(pent->d_name, ".."))
-			continue;
-
-		strcat(cwd, pent->d_name);
-		bool isdir = isDirectory(cwd);
-		*(strrchr(cwd, '/') + 1) = '\x00';
-
-		if (isdir || !filter || filter(pent->d_name))
-			count++;
-	}
-
-	rewinddir(pdir);
-	return count;
-}
-
-static int ReadDirectory(DIR* pdir, struct entry entries[], int count, FileFilter filter) {
-	if (!pdir)
-		return 0;
-
-	int i = 0;
-	while (i < count) {
-		struct dirent* pent = readdir(pdir);
-		if (!pent)
-			break;
-
-		if (!strcmp(pent->d_name, ".") || !strcmp(pent->d_name, ".."))
-			continue;
-
-		strcat(cwd, pent->d_name);
-		bool isdir = isDirectory(cwd);
-		*(strrchr(cwd, '/') + 1) = '\x00';
-
-		if (!isdir && filter && !filter(pent->d_name))
-			continue;
-
-		entries[i].flags =
-			(isdir << 0);
-
-		strcpy(entries[i].name, pent->d_name);
-		if (isdir)
-			strcat(entries[i].name, "/");
-
+	while (i < max) {
+		putchar('\n');
 		i++;
 	}
-
-	return i;
 }
 
-static struct entry* GetDirectoryEntries(const char* path, struct entry** entries, int* count, FileFilter filter) {
+static bool GetDirectoryEntries(const char* path, struct entry** entries, int* count, FileFilter filter) {
+	if (!entries || !count || !path) return NULL;
+
 	DIR* pdir;
+	struct dirent* ent = NULL;
+	struct entry* _entries = NULL;
 	int cnt = 0;
 
-	if (!entries || !count || !path) return NULL;
-	if (!(pdir = opendir(path)))
-		return NULL;
+	pdir = opendir(path);
+	if (!pdir)
+		return false;
 
-	cnt = GetDirectoryEntryCount(pdir, filter);
-	if (!cnt) {
-		*count = 0;
-		if (*entries)
-			(*entries)[0] = (struct entry){ 0x80, {} };
-		else
-			errno = ENOENT;
+	while ((ent = readdir(pdir))) {
+		if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..") || !strncmp(ent->d_name, "._", 2) )
+			continue;
 
-		return NULL;
+		bool isdir = (ent->d_type == DT_DIR);
+		if (!isdir && !filter(ent->d_name))
+			continue;
+
+		// If ptr is NULL, then the call is equivalent to malloc(size), for all values of size.
+		_entries = reallocarray(*entries, cnt + 1, sizeof(struct entry));
+		if (!_entries) {
+			free(*entries);
+			*entries = NULL;
+			errno = ENOMEM;
+			return false;
+		}
+		*entries = _entries;
+
+		struct entry* entry = &_entries[cnt++];
+
+		memset(entry, 0, sizeof(struct entry));
+		strcpy(entry->name, ent->d_name);
+		if ((entry->isdir = isdir))
+			strcat(entry->name, "/");
 	}
 
-	// If ptr is NULL, then the call is equivalent to malloc(size), for all values of size.
-	struct entry* _entries = reallocarray(*entries, cnt, sizeof(struct entry));
-	if (!_entries) {
-		free(*entries);
-		*entries = NULL;
-		errno = ENOMEM;
-		return NULL;
-	}
-	memset(_entries, 0, sizeof(struct entry) * cnt);
-	*count = ReadDirectory(pdir, _entries, cnt, filter);
-	*entries = _entries;
+	qsort(_entries, cnt, sizeof(struct entry), entry_sort);
+
+	*count = cnt;
 
 	closedir(pdir);
-	return *entries;
+	return true;
 }
 
-static const char* FileSelectAction(u8 flags) {
-	if (flags & 0x01)	return "Enter";
-	if (flags & 0x80)	return "Go back";
-
-	return "Install";
-}
-
-char* SelectFileMenu(const char* header, const char* defaultFolder, FileFilter filter) {
+int SelectFileMenu(const char* header, const char* defaultFolder, FileFilter filter, char filepath[PATH_MAX]) {
+	static char workpath[PATH_MAX];
 	struct entry* entries = NULL;
 	int cnt = 0, start = 0, index = 0, max = 0;
 	int conX = 0, conY = 0;
-	static char filename[PATH_MAX];
-	static char line[0x80];
+	char line[128];
 
 	CON_GetMetrics(&conX, &conY);
 	memset(line, 0xc4, conX);
-	line[conX] = 0;
+	// line[conX] = 0;
 	max = conY - 6; // 3 lines for the top and 3 lines for the bottom
 
-	sprintf(cwd, "%s:/", GetActiveDeviceName());
+	if (defaultFolder) {
+		sprintf(workpath, "%s:%s/", GetActiveDeviceName(), defaultFolder);
 
-	if (defaultFolder)
-		sprintf(strrchr(cwd, '/'), "/%s/", defaultFolder);
+		if (GetDirectoryEntries(workpath, &entries, &cnt, filter))
+			goto a;
+	}
 
-	if (!GetDirectoryEntries(cwd, &entries, &cnt, filter))
-		GetDirectoryEntries(goBack(cwd), &entries, &cnt, filter);
+	sprintf(workpath, "%s:/", GetActiveDeviceName());
+	GetDirectoryEntries(workpath, &entries, &cnt, filter);
 
-
+a:
 	for(;;) {
-		if (!entries) {
-			if (errno != ECANCELED)
-				perror("GetDirectoryEntries failed");
-
-			return NULL;
-		}
 		clear();
+		if (!entries)
+			return -1;
 
-		struct entry* entry = entries + index;
+		struct entry* entry = &entries[index];
 
-		printf("\n%s\nCurrent directory: [%s] - %i-%i of %i total\n%s",
-			header ? header : "", cwd, start + 1, start + MIN(max, cnt - start), cnt, line);
+		const char* workpath_ptr = (strlen(workpath) > 30) ? workpath + strlen(workpath) - 30 : workpath;
+		printf(
+			"\n%s\n"
+			"Current directory: [%s] - %i-%i of %i total\n"
+			"%.*s",
+		header ?: "Select a file.",
+		workpath_ptr, start + 1, start + MIN(max, cnt - start), cnt,
+		conX, line);
 
 		PrintEntries(entries, start, cnt, max, index);
-		printf("\x1b[%i;0H%s"
-		//	"Controls:\n"
-			"	A/Right\x10 : %-35s Up\x1e/Down\x1f : Select\n"
-			"	B/\x11Left  : %-35s Home/Start: Exit",
-			conY - 2, line,
-			FileSelectAction(entry->flags),
-			(strchr(cwd, '/') == strrchr(cwd, '/')) ? "Exit" : "Go back"
+
+		printf(
+			"%.2sControls:%.*s\n"
+			"	(A) : %-35s Up\x1e/Down\x1f : Select\n"
+			"	[B] : %-35s Home/Start: Cancel",
+			line, conX - 12, line,
+			(!cnt) ? "Go back" : ((entry->isdir) ? "Enter" : "Install"),
+			(strchr(workpath, '/') == strrchr(workpath, '/')) ? "Cancel" : "Go back"
 		);
 
-		for(;;) {
-			scanpads();
-			u32 buttons = buttons_down(0);
-			if (buttons & WPAD_BUTTON_DOWN) {
-				if (index >= (cnt - 1)) {
-					start = index = 0;
-					break;
-				}
+		u32 buttons = wait_button(0);
+		if (buttons & WPAD_BUTTON_DOWN) {
+			if (index >= (cnt - 1))
+				start = index = 0;
 
-				if ((++index - start) >= max)
-					start++;
-
-				break;
+			else if ((++index - start) >= max)
+				start++;
+		}
+		else if (buttons & WPAD_BUTTON_UP) {
+			if (index <= 0) {
+				index = cnt - 1;
+				if (index >= max)
+					start = 1 + index - max;
 			}
-			else if (buttons & WPAD_BUTTON_UP) {
-				if (index <= 0) {
-					index = cnt - 1;
-					if (index >= max)
-						start = 1 + index - max;
 
-					break;
-				}
+			else if (--index < start)
+				start--;
 
-				if (--index < start)
-					start--;
-
-				break;
-			}
-			else if (buttons & WPAD_BUTTON_A) {
-				if (entry->flags & 0x80) {
-					goBack(cwd);
-					GetDirectoryEntries(cwd, &entries, &cnt, filter);
-					index = start = 0;
-					break;
-				}
-				else if (entry->flags & 0x01) {
-					sprintf(strrchr(cwd, '/'), "/%s", entry->name);
-					GetDirectoryEntries(cwd, &entries, &cnt, filter);
-					index = start = 0;
-					break;
-				}
-				else {
-					strcpy(filename, cwd);
-					strcat(filename, entry->name);
-					free(entries);
-					return filename;
-				}
-				break;
-			}
-			else if (buttons & WPAD_BUTTON_B) {
-				if (!goBack(cwd)) {
-					errno = ECANCELED;
-					free(entries);
-					return NULL;
-				}
-
-				GetDirectoryEntries(cwd, &entries, &cnt, filter);
+		}
+		else if (buttons & WPAD_BUTTON_A) {
+			if (!cnt) {
+				goBack(workpath);
+				GetDirectoryEntries(workpath, &entries, &cnt, filter);
 				index = start = 0;
-				break;
 			}
-			else if (buttons & WPAD_BUTTON_HOME) {
-				errno = ECANCELED;
+			else if (entry->isdir) {
+				strcat(workpath, entry->name);
+				// strcat(workpath, "/");
+				GetDirectoryEntries(workpath, &entries, &cnt, filter);
+				index = start = 0;
+			}
+			else {
+				strcpy(filepath, workpath);
+				strcat(filepath, entry->name);
 				free(entries);
-				return NULL;
+				return 0;
 			}
 		}
+		else if (buttons & WPAD_BUTTON_B) {
+			if (!goBack(workpath)) {
+				free(entries);
+				entries = NULL;
+				errno = ECANCELED;
+				return -1;
+			}
+
+			GetDirectoryEntries(workpath, &entries, &cnt, filter);
+			index = start = 0;
+		}
+		else if (buttons & WPAD_BUTTON_HOME) {
+			free(entries);
+			entries = NULL;
+			errno = ECANCELED;
+			return -1;
+		}
 	}
+
+	return 0;
 }
