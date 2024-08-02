@@ -5,14 +5,17 @@
 #include <ogc/ipc.h>
 #include <ogc/isfs.h>
 
+struct sysmenu {
+    uint16_t version;
+    char platform;
+    char region;
+    char versionMajor;
+    bool hasPriiloader;
+    bool isvWii;
+    tmd_content archive;
+    aeskey titlekey;
+};
+
+extern struct sysmenu sysmenu[];
+
 int sysmenu_process();
-bool hasPriiloader();
-uint64_t getSmNUSTitleID();
-const uint8_t* getSmTitleKey();
-uint32_t getArchiveCid();
-size_t getArchiveSize();
-bool isArchive(sha1);
-uint16_t getSmVersion();
-char getSmVersionMajor();
-char getSmRegion();
-char getSmPlatform();

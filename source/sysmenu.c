@@ -17,12 +17,7 @@
 
 static const char u8_header[] = { 0x55, 0xAA, 0x38, 0x2D };
 
-static aeskey sm_titleKey = {};
-static bool is_vWii = false;
-static ThemeBase sm_platform = 0;
-static bool priiloader = false;
-static tmd sm_tmd = {};
-static tmd_content sm_archive = {};
+struct sysmenu sysmenu[1];
 
 /* from YAWM ModMii Edition
 const u16 VersionList[] = {
@@ -130,9 +125,8 @@ int sysmenu_process() {
 	}
 
 	tmd* p_tmd = SIGNATURE_PAYLOAD(buffer);
-	sm_tmd = *p_tmd;
 
-	uint16_t rev = p_tmd->title_version;
+	uint16_t rev = sysmenu->version = p_tmd->title_version;
 	if (rev > 0x2000) {
 		printf("Bad system menu version! (%hu/%04hx)\nInvalid or not vanilla.\n", rev, rev);
 		ret = -EINVAL;
@@ -172,9 +166,8 @@ int sysmenu_process() {
 		sprintf(strrchr(filepath, '/'), "/%08x.app", content->cid);
 
 		if (content->index == p_tmd->boot_index) { // how Priiloader installer does it
-			*(strrchr(filepath, '/') + 1) = '1';
-			if(NAND_GetFileSize(filepath, NULL) >= 0)
-				priiloader = true;
+			strrchr(filepath, '/')[1] = '1';
+			sysmenu->hasPriiloader = (NAND_GetFileSize(filepath, NULL) >= 0);
 		}
 		else {
 			char header[4] ATTRIBUTE_ALIGN(0x20) = {};
@@ -185,11 +178,11 @@ int sysmenu_process() {
 			}
 
 			if (memcmp(header, u8_header, sizeof(u8_header)) == 0)
-				sm_archive = *content;
+				sysmenu->archive = *content;
 		}
 	}
 
-	if(!sm_archive.cid) {
+	if (!sysmenu->archive.cid) {
 		puts("Failed to identify system menu archive!");
 		ret = -ENOENT;
 		goto finish;
@@ -202,35 +195,19 @@ int sysmenu_process() {
 	}
 
 	tik* p_tik = SIGNATURE_PAYLOAD(buffer);
-	if (p_tik->reserved[0xb] == 0x02) {
-		sm_platform = (ThemeBase)vWii;
-		is_vWii = true;
+	if ((sysmenu->isvWii = p_tik->reserved[0xb] == 0x02)) {
+		sysmenu->platform = (ThemeBase)vWii;
 	}
 	else if ((rev & 0xFFF0) == 0x1200) {
-		sm_platform = (ThemeBase)Mini;
+		sysmenu->platform = (ThemeBase)Mini;
 	}
 	else {
-		sm_platform = (ThemeBase)Wii;
+		sysmenu->platform = (ThemeBase)Wii;
 	}
 
-	GetTitleKey(p_tik, sm_titleKey);
+	GetTitleKey(p_tik, sysmenu->titlekey);
 
 finish:
 	free(buffer);
 	return ret;
 }
-
-uint64_t getSmNUSTitleID() {
-	return is_vWii? 0x0000000700000002LL:
-					0x0000000100000002LL;
-}
-
-bool hasPriiloader() { return priiloader; }
-uint32_t getArchiveCid() { return sm_archive.cid; }
-size_t getArchiveSize() { return sm_archive.size; }
-const uint8_t* getSmTitleKey() { return sm_titleKey; }
-uint16_t getSmVersion() { return sm_tmd.title_version; }
-bool isArchive(sha1 hash) { return memcmp(sm_archive.hash, hash, sizeof(sha1)) == 0; }
-char getSmRegion() { return _getSMRegion(sm_tmd.title_version); }
-char getSmVersionMajor() { return _getSMVersionMajor(sm_tmd.title_version); }
-char getSmPlatform() { return sm_platform; }
