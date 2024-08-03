@@ -284,20 +284,25 @@ int SaveCurrentTheme(void) {
 		goto finish;
 	}
 
+	sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version);
+
 	mbedtls_sha1_ret(buffer, fsize, hash);
-	if (!memcmp(hash, sysmenu->archive.hash, sizeof(sha1))) {
-		sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version);
-	}
-	else {
-		uint32_t* hashptr = (uint32_t*)hash;
+	if (!memcmp(hash, sysmenu->archive.hash, sizeof(sha1)))
+		strcat(filepath, ".app");
+	else
+		sprintf(strchr(filepath, 0), "_%016llx.csm", *(uint64_t*)hash);
 
-		sprintf(filepath, "%s:/themes/%08x-v%hu_%08x%08x.csm", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version, hashptr[0], hashptr[1]);
+	size_t _fsize = 0;
+	printf("'%s'\n", filepath);
+	if (!FAT_GetFileSize(filepath, &fsize) && _fsize == fsize) {
+		puts("File already exists.");
+	} else {
+		ret = FAT_Write(filepath, buffer, fsize, progressbar);
+		if (ret < 0)
+			perror("Failed to save");
 	}
 
-	printf("Saving to %s\n", filepath);
-	ret = FAT_Write(filepath, buffer, fsize, progressbar);
-	if (ret < 0)
-		perror("Failed to save");
+
 
 finish:
 	free(buffer);
@@ -306,8 +311,9 @@ finish:
 
 int PatchThemeInPlace(void) {
 	int ret;
-	char filepath[ISFS_MAXPATH];
+	char filepath[256];
 	size_t fsize;
+	sha1 hash = {};
 	U8Context ctx = {};
 
 	if (sysmenu->platform != vWii) {
@@ -315,7 +321,7 @@ int PatchThemeInPlace(void) {
 		return 0;
 	}
 
-	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
+	snprintf(filepath, ISFS_MAXPATH, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
 
 	ret = NAND_GetFileSize(filepath, &fsize);
 	if (ret < 0) {
@@ -335,15 +341,34 @@ int PatchThemeInPlace(void) {
 		goto finish;
 	}
 
+	// Get the hash from now
+	mbedtls_sha1_ret(buffer, fsize, hash);
+
 	if (!u8ContextInit(buffer, &ctx)) {
 		puts("u8ContentInit() failed? What?");
 		goto finish;
 	}
 
-	if (PatchTheme43DB(&ctx))
-		ret = WriteThemeFile(buffer, fsize);
-	else
+	if (!PatchTheme43DB(&ctx)) {
 		puts("PatchTheme43DB() returned 0, did you already patch it?");
+		goto finish;
+	}
+
+	sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version);
+
+	if (memcmp(hash, sysmenu->archive.hash, sizeof(sha1)) != 0)
+		sprintf(strchr(filepath, 0), "_%016llx", *(uint64_t*)hash);
+
+	strcat(filepath, "-43patched.csm");
+
+	printf("'%s'\n", filepath);
+	if (!FAT_GetFileSize(filepath, NULL)) {
+		puts("File already exists.");
+	} else {
+		ret = FAT_Write(filepath, buffer, fsize, progressbar);
+		if (ret < 0)
+			perror("Failed to save");
+	}
 
 finish:
 	u8ContextFree(&ctx);

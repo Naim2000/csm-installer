@@ -44,34 +44,34 @@ static char _getSMVersionMajor(uint16_t rev) {
 	if (!rev)
 		return 0;
 
-	switch (rev >> 4) {
+	switch (rev >> 5) {
+		case 0x01:
 		case 0x02:
-		case 0x04:
 			return '1';
 
+		case 0x03:
+		case 0x04:
+		case 0x05:
 		case 0x06:
-		case 0x08:
-		case 0x0a:
-		case 0x0c:
 			return '2';
 
-		case 0x0e:
-		case 0x10:
-		case 0x12:
-		case 0x14:
-		case 0x16:
-		case 0x18:
+		case 0x07:
+		case 0x08:
+		case 0x09:
+		case 0x0A:
+		case 0x0B:
+		case 0x0C:
 			return '3';
 
-		case 0x1a:
-		case 0x1c:
-		case 0x1e:
-		case 0x20:
+		case 0x0D:
+		case 0x0E:
+		case 0x0F:
+		case 0x10:
 		// vWii
-		case 0x22:
-		case 0x26:
+		case 0x11:
+		case 0x12:
 		// Wii Mini
-		case 0x120:
+		case 0x90:
 			return '4';
 	}
 
@@ -82,7 +82,7 @@ static char _getSMRegion(uint16_t rev) {
 	if (!rev)
 		return 0;
 
-	switch (rev & 0xf) {
+	switch (rev & 0x1F) {
 		case 0:
 			return 'J';
 
@@ -126,6 +126,7 @@ int sysmenu_process() {
 
 	tmd* p_tmd = SIGNATURE_PAYLOAD(buffer);
 
+	bool isvWii = (bool)p_tmd->vwii_title;
 	uint16_t rev = sysmenu->version = p_tmd->title_version;
 	if (rev > 0x2000) {
 		printf("Bad system menu version! (%hu/%04hx)\nInvalid or not vanilla.\n", rev, rev);
@@ -133,13 +134,13 @@ int sysmenu_process() {
 		goto finish;
 	}
 
-	if (!_getSMRegion(rev)) {
+	if (!(sysmenu->region = _getSMRegion(rev))) {
 		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify region (what are the last 4 bits?)\n", rev, rev);
 		ret = -EINVAL;
 		goto finish;
 	}
 
-	if (!_getSMVersionMajor(rev)) {
+	if (!(sysmenu->versionMajor = _getSMVersionMajor(rev))) {
 		printf("Bad system menu version! (%hu/%04hx)\nUnable to identify major revision.\n", rev, rev);
 		ret = -EINVAL;
 		goto finish;
@@ -195,10 +196,10 @@ int sysmenu_process() {
 	}
 
 	tik* p_tik = SIGNATURE_PAYLOAD(buffer);
-	if ((sysmenu->isvWii = p_tik->reserved[0xb] == 0x02)) {
+	if ((sysmenu->isvWii = isvWii)) {
 		sysmenu->platform = (ThemeBase)vWii;
 	}
-	else if ((rev & 0xFFF0) == 0x1200) {
+	else if ((rev & 0xFFE0) == 0x1200) {
 		sysmenu->platform = (ThemeBase)Mini;
 	}
 	else {

@@ -83,7 +83,7 @@ finish:
 
 static SettingsItem settings[] = {
 	{
-		.name = "(vWii) 43DB fix for WC24 channels",
+		.name = "43DB fix for WC24 channels (vWii)",
 		.options = (const char*[]){ "Enabled", "Disabled" },
 		.count = 2,
 		.selected = &ww43dbmode
