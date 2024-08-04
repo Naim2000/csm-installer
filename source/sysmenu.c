@@ -69,7 +69,7 @@ static char _getSMVersionMajor(uint16_t rev) {
 		case 0x10:
 		// vWii
 		case 0x11:
-		case 0x12:
+		case 0x13:
 		// Wii Mini
 		case 0x90:
 			return '4';
