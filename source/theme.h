@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef enum ThemeBase: char {
+typedef enum ThemeBase {
 	Wii = 'W',
 	vWii = 'V',
 	Mini = 'M',

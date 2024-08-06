@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -103,7 +104,7 @@ int sysmenu_process() {
 	int ret;
 	uint32_t size = 0;
 	signed_blob* buffer = NULL;
-	char filepath[0x80] __aligned(0x20) = "/title/00000001/00000002/content/";
+	char filepath[ISFS_MAXPATH];
 
 	ret = ES_GetStoredTMDSize(0x100000002LL, &size);
 	if (ret < 0) {
@@ -125,9 +126,10 @@ int sysmenu_process() {
 	}
 
 	tmd* p_tmd = SIGNATURE_PAYLOAD(buffer);
+	sysmenu->tmd = *p_tmd;
 
 	bool isvWii = (bool)p_tmd->vwii_title;
-	uint16_t rev = sysmenu->version = p_tmd->title_version;
+	uint16_t rev = p_tmd->title_version;
 	if (rev > 0x2000) {
 		printf("Bad system menu version! (%hu/%04hx)\nInvalid or not vanilla.\n", rev, rev);
 		ret = -EINVAL;
@@ -146,28 +148,16 @@ int sysmenu_process() {
 		goto finish;
 	}
 
+	char* content_name = stpcpy(filepath, "/title/00000001/00000002/content/");
 	for (int i = 0; i < p_tmd->num_contents; i++) {
 		tmd_content* content = p_tmd->contents + i;
 		if (content->type & 0x8000)
 			continue;
 
-		/*
-			STACK DUMP:
-			800fe468 <memmove+376>			stb r6,0(r7)
-			8010f968 <__ssprint_r+104>		bl 0x800fe350 <memmove>
-			80008488 <sysmenu_process+560>	bl 0x800f7038 <sprintf>
-
-			"why is r7 0..?"
-			*makes filepath 2x bigger
-			"Failed to open <garbage memory>0000001/00000002/content/00000097.app (-6)"
-			*add __aligned(0x20)
-			*works
-			*ok?
-		*/
-		sprintf(strrchr(filepath, '/'), "/%08x.app", content->cid);
+		sprintf(content_name, "%08x.app", content->cid);
 
 		if (content->index == p_tmd->boot_index) { // how Priiloader installer does it
-			strrchr(filepath, '/')[1] = '1';
+			content_name[0] = '1';
 			sysmenu->hasPriiloader = (NAND_GetFileSize(filepath, NULL) >= 0);
 		}
 		else {
@@ -196,6 +186,8 @@ int sysmenu_process() {
 	}
 
 	tik* p_tik = SIGNATURE_PAYLOAD(buffer);
+	sysmenu->ticket = *p_tik;
+
 	if ((sysmenu->isvWii = isvWii)) {
 		sysmenu->platform = (ThemeBase)vWii;
 	}
@@ -205,8 +197,6 @@ int sysmenu_process() {
 	else {
 		sysmenu->platform = (ThemeBase)Wii;
 	}
-
-	GetTitleKey(p_tik, sysmenu->titlekey);
 
 finish:
 	free(buffer);

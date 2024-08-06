@@ -6,14 +6,16 @@
 #include <ogc/isfs.h>
 
 struct sysmenu {
-    uint16_t version;
+    tmd tmd;
+    tik ticket;
+    tmd_content archive;
+
     char platform;
     char region;
     char versionMajor;
+
     bool hasPriiloader;
     bool isvWii;
-    tmd_content archive;
-    aeskey titlekey;
 };
 
 extern struct sysmenu sysmenu[];

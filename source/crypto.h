@@ -2,6 +2,7 @@
 #include <ogc/es.h>
 #include <assert.h>
 #include <mbedtls/aes.h>
+#include <mbedtls/sha1.h>
 
 typedef union {
 	int16_t index;
@@ -20,3 +21,5 @@ static const aeskey CommonKeys[3] = {
 
 void GetTitleKey(tik*, aeskey);
 void ChangeCommonKey(tik*, uint8_t);
+int DecryptTitleContent(tik* p_tik, uint16_t index, void* content, size_t csize, void* out, void* iv);
+bool CheckHash(void*, size_t, sha1);

@@ -1,5 +1,4 @@
-#include "theme.h"
-
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -11,8 +10,10 @@
 #include <mbedtls/sha1.h>
 #include <mbedtls/aes.h>
 
+#include "theme.h"
 #include "malloc.h"
 #include "sysmenu.h"
+#include "crypto.h"
 #include "fs.h"
 #include "fatMounter.h"
 #include "network.h"
@@ -27,8 +28,7 @@ static const char
 	binary_path_search_3[] = "c:\\home\\neceCheck\\WiiMenu\\ipl\\bin\\RVL\\Final_", // What
 	binary_path_fmt12[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c";
 
-extern void* memmem(const void* haystack, size_t haystack_len, const void* needle, size_t needle_len);
-
+// Todo: overhaul this function
 SignatureLevel SignedTheme(const void* buffer, size_t length) {
 	sha1 hash = {};
 	mbedtls_sha1_ret(buffer, length, hash);
@@ -184,14 +184,13 @@ int DownloadOriginalTheme() {
 	int ret;
 	char url[192] = "http://nus.cdn.shop.wii.com/ccs/download/";
 	char filepath[ISFS_MAXPATH];
+	void* buffer;
 	size_t fsize = sysmenu->archive.size;
 	blob download = {};
-	mbedtls_aes_context title = {};
-	aeskey iv = { 0x00, 0x01 };
 
 	puts("Downloading original theme.");
 
-	void* buffer = memalign32(fsize);
+	buffer = memalign32(fsize);
 	if (!buffer) {
 		printf("No memory...??? (failed to allocate %u bytes)\n", fsize);
 		return -ENOMEM;
@@ -200,7 +199,7 @@ int DownloadOriginalTheme() {
 	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
 	ret = NAND_Read(filepath, buffer, fsize, NULL);
 
-	sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version);
+	sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
 	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) goto save;
 
 	ret = FAT_Read(filepath, buffer, fsize, NULL);
@@ -230,11 +229,10 @@ int DownloadOriginalTheme() {
 	}
 
 	puts("Decrypting...");
-	mbedtls_aes_setkey_dec(&title, sysmenu->titlekey, 128);
-	mbedtls_aes_crypt_cbc(&title, MBEDTLS_AES_DECRYPT, download.size, iv, download.ptr, buffer);
+	DecryptTitleContent(&sysmenu->ticket, 1, download.ptr, download.size, buffer, NULL);
 	free(download.ptr);
 
-	if (SignedTheme(buffer, fsize) != default_theme) {
+	if (!CheckHash(buffer, fsize, sysmenu->archive.hash)) {
 		puts("Decryption failed?? (hash mismatch)");
 		goto finish;
 	}
@@ -280,7 +278,7 @@ int SaveCurrentTheme(void) {
 		goto finish;
 	}
 
-	sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version);
+	sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
 
 	mbedtls_sha1_ret(buffer, fsize, hash);
 	if (!memcmp(hash, sysmenu->archive.hash, sizeof(sha1)))
@@ -351,7 +349,7 @@ int PatchThemeInPlace(void) {
 		goto finish;
 	}
 
-	sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->version);
+	sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
 
 	if (memcmp(hash, sysmenu->archive.hash, sizeof(sha1)) != 0)
 		sprintf(strchr(filepath, 0), "_%016llx", *(uint64_t*)hash);
