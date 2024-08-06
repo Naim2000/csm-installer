@@ -112,26 +112,24 @@ static int WriteThemeFile(void* buffer, size_t fsize) {
 }
 
 static int PatchTheme43DB(U8Context* ctx) {
-	U8Node* wwdb = NULL;
-	uint32_t wwdb_index;
+	int ret;
+	U8File wwdb = {};
 	AspectRatioDatabase* ardb = NULL;
 
 	puts("Patching WiiWare 4:3 database...");
 
-	if (!(wwdb = u8GetFileNodeByPath(ctx, "/titlelist/wwdb.bin", &wwdb_index)))
+	ret = U8OpenFile(ctx, "/titlelist/wwdb.bin", &wwdb);
+	if (ret != 0)
 	{
-		puts("Failed to find /titlelist/wwdb.bin in archive?");
+		printf("Failed to open /titlelist/wwdb.bin in archive? (%i)\n", ret);
 		return 0;
 	}
 
-	ardb = (AspectRatioDatabase*)(ctx->u8_buf + wwdb->data_offset);
+	ardb = (AspectRatioDatabase*)wwdb.data_ptr;
 	uint32_t filtered = filter_ardb(ardb, ardb_filter_wc24);
 
-	if (filtered) {
-		// Find the real location of the node
-		U8Node* nodes = (U8Node*)(ctx->u8_buf + ctx->u8_header.root_node_offset);
-		nodes[wwdb_index].size -= (filtered * sizeof(uint32_t));
-	}
+	if (filtered)
+		ctx->nodes[wwdb.node_index].size -= (filtered * sizeof(uint32_t));
 
 	return filtered;
 }
@@ -145,8 +143,8 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 		);
 		return -EINVAL;
 	}
-	else if (!u8ContextInit(buffer, &ctx)) {
-		puts("u8ContextInit() failed, is this really a theme?");
+	else if (U8Init(buffer, size, &ctx) != 0) {
+		puts("U8Init() failed, is this really a theme?");
 		return -EINVAL;
 	}
 
@@ -178,8 +176,6 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 
 	if (themeversion.base == vWii && dbpatching)
 		PatchTheme43DB(&ctx);
-
-	u8ContextFree(&ctx);
 
 	return WriteThemeFile(buffer, size);
 }
@@ -344,8 +340,9 @@ int PatchThemeInPlace(void) {
 	// Get the hash from now
 	mbedtls_sha1_ret(buffer, fsize, hash);
 
-	if (!u8ContextInit(buffer, &ctx)) {
-		puts("u8ContentInit() failed? What?");
+	ret = U8Init(buffer, fsize, &ctx);
+	if (ret != 0) {
+		printf("U8Init() failed? What? (%i)\n", ret);
 		goto finish;
 	}
 
@@ -371,7 +368,6 @@ int PatchThemeInPlace(void) {
 	}
 
 finish:
-	u8ContextFree(&ctx);
 	free(buffer);
 	return ret;
 
