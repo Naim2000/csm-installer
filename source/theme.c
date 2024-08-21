@@ -259,15 +259,16 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 	return WriteThemeFile(buffer, size);
 }
 
-int DownloadOriginalTheme() {
+int DownloadOriginalTheme(bool silent) {
 	int ret;
-	char url[192] = "http://nus.cdn.shop.wii.com/ccs/download/";
+	bool installedIsOriginal = false;
 	char filepath[ISFS_MAXPATH];
 	void* buffer;
 	size_t fsize = sysmenu->archive.size;
+	char url[192] = "http://nus.cdn.shop.wii.com/ccs/download/";
 	blob download = {};
 
-	puts("Downloading original theme.");
+	if (!silent) puts("Downloading original theme.");
 
 	buffer = memalign32(fsize);
 	if (!buffer) {
@@ -280,13 +281,18 @@ int DownloadOriginalTheme() {
 
 	sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
 	if (ret >= 0 && CheckHash(buffer, fsize, sysmenu->archive.hash))
-		goto save;
+		installedIsOriginal = true;
 
 	ret = FAT_Read(filepath, buffer, fsize, NULL);
 	if (ret >= 0 && CheckHash(buffer, fsize, sysmenu->archive.hash)) {
-		printf("Already saved. Look for '%s'\n", filepath);
+		if (!silent) printf("Already saved. Look for '%s'\n", filepath);
 		goto finish;
 	}
+
+	if (installedIsOriginal)
+		goto save;
+	else if (silent)
+		goto finish;
 
 	puts("Initializing network... ");
 	ret = network_init();
@@ -326,6 +332,7 @@ save:
 	else
 		printf("Saved original theme to '%s'.\n", filepath);
 
+	if (silent) usleep(5000000);
 finish:
 	free(buffer);
 //	network_deinit();

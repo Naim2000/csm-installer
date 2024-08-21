@@ -82,6 +82,10 @@ finish:
 	return ret;
 }
 
+int DownloadOriginal(void) {
+	return DownloadOriginalTheme(false);
+}
+
 static SettingsItem settings[] = {
 	{
 		.name = "43DB fix for WC24 channels (vWii)",
@@ -153,14 +157,13 @@ static MainMenuItem items[] = {
 
 	{
 		.name = "Download base theme",
-		.action = DownloadOriginalTheme,
+		.action = DownloadOriginal,
 		.heading = true,
 		.pause = true
 	},
 
-
 	{
-		.name = "Apply 43DB fix to current theme (vWii)",
+		.name = "Apply 43DB fix to current theme (vWii)\n",
 		.action = PatchThemeInPlace,
 		.heading = true,
 		.pause = true
@@ -212,6 +215,13 @@ int main() {
 	if (sysmenu_process() < 0)
 		goto waitexit;
 
+	if (!FATMount()) {
+		puts("Unable to mount a storage device...");
+		goto waitexit;
+	}
+
+	DownloadOriginalTheme(true);
+
 	if (!sysmenu->hasPriiloader) {
 		printf("\x1b[30;1mPlease install Priiloader..!\x1b[39m\n\n");
 		sleep(2);
@@ -224,14 +234,11 @@ int main() {
 	}
 
 	while (true) {
-		clear();
-
-		if (!FATMount()) {
-			// puts("Unable to mount a storage device...");
-			goto waitexit;
-		}
-
 		MainMenu(items, NBR_ITEMS);
+
+		clear();
+		if (!FATMount())
+			goto waitexit;
 	}
 
 

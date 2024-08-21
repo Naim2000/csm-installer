@@ -23,7 +23,7 @@ typedef enum {
 
 // SignatureLevel SignedTheme(const void* buffer, size_t length);
 int InstallTheme(void* buffer, size_t length, int dbpatching);
-int DownloadOriginalTheme(void);
+int DownloadOriginalTheme(bool);
 int PatchThemeInPlace(void);
 int SaveCurrentTheme(void);
 version_t GetThemeVersion(const void* buffer, size_t length);
