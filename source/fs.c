@@ -112,7 +112,10 @@ int FAT_Read(const char* filepath, void* buffer, size_t filesize, RWCallback cal
 }
 
 int NAND_Write(const char* filepath, const void* buffer, size_t filesize, RWCallback callback) {
-	int ret = ISFS_Open(filepath, ISFS_OPEN_WRITE);
+	char tmpfilepath[32];
+	sprintf(tmpfilepath, "/tmp%s", strrchr(filepath, '/'));
+
+	int ret = ISFS_Open(tmpfilepath, ISFS_OPEN_WRITE);
 	if (ret < 0)
 		return ret;
 
@@ -128,12 +131,24 @@ int NAND_Write(const char* filepath, const void* buffer, size_t filesize, RWCall
 	}
 
 	ISFS_Close(fd);
-	if (wrote == filesize)
-		return 0;
-	else if (ret < 0)
+	if (ret < 0)
 		return ret;
-	else
+	else if (wrote != filesize)
 		return -EIO;
+
+	ret = ISFS_Delete(filepath);
+	if (ret < 0) {
+		printf("ISFS_Delete() failed (%i). This isn't supposed to happen.\n", ret);
+		return ret;
+	}
+
+	ret = ISFS_Rename(tmpfilepath, filepath);
+	if (ret < 0) {
+		printf("ISFS_Rename() failed (%i). This isn't supposed to happen.\n", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 int FAT_Write(const char* filepath, const void* buffer, size_t filesize, RWCallback callback) {
