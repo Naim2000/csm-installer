@@ -8,10 +8,10 @@
 
 #define ERROR(str, ...) fprintf(stderr, "%s:%i: \n" str "\n", __FILE__, __LINE__, ##__VA_ARGS__)
 
-int U8Init(void* ptr, size_t fsize, U8Context* ctx) {
-    assert(ptr != NULL && ctx != NULL);
+int U8Init(void* ptr, U8Context* ctx) {
+    assert(ptr != NULL);
 
-    memset(ctx, 0, sizeof(U8Context));
+    if (ctx) memset(ctx, 0, sizeof(U8Context));
 
     U8Header* header = (U8Header*)ptr;
 
@@ -47,7 +47,6 @@ int U8Init(void* ptr, size_t fsize, U8Context* ctx) {
         }
 
         const char* node_name = str_table + node->name_offset;
-        // OSReport("Node #%u, name: +%#x '%s', type=%#x, ofs=%u", index, node->name_offset, node_name, node->type, node->offset);
 
         if (node->type == 0x00) {
             if (node->offset < header->data_offset) {
@@ -55,22 +54,66 @@ int U8Init(void* ptr, size_t fsize, U8Context* ctx) {
                 return -5;
             }       
         } else {
-            if (node->offset > node_count) {
+            if (node->size > node_count) {
                 ERROR("End marker for directory node #%u (%s) is out of bounds (%#x > %#x)", index, node_name, node->offset, node_count);
                 return -5;
             }
         }
-
     }
 
-    ctx->header = *header;
-    ctx->nodes = nodes;
-    ctx->node_count = node_count;
-    ctx->str_table = str_table;
-    ctx->str_table_size = str_table_size;
+    if (ctx) {
+        ctx->header = *header;
+        ctx->nodes = nodes;
+        ctx->node_count = node_count;
+        ctx->str_table = str_table;
+        ctx->str_table_size = str_table_size;
 
-    ctx->ptr = ptr;
+        ctx->ptr = ptr;
+    }
+
     return 0;
+}
+
+#define next_sibling(N, n) ((((N[n]).type == 0x00) ? n + 1 : ((N[n]).size)))
+#define has_child(N, n) ((N[n]).type == 0x01 && (n + 1) != (N[n].size))
+
+void U8Examine(U8Context* ctx) {
+    unsigned int dir_stack[16] = { ctx->node_count };
+    int dir_lvl = 0;
+    char string[128];
+    const char
+        dir_skip = 0xb3,
+        dir_child = 0xc3,
+        dir_last_child = 0xc0,
+        dir_start = 0xc2,
+        child = 0xc4;
+
+
+    printf("/ (node count=%u)\n", ctx->node_count);
+
+    for (unsigned int index = 1; index < ctx->node_count; index++) {
+        U8Node* node = &ctx->nodes[index];
+        const char* name = ctx->str_table + node->name_offset;
+
+        char* ptr = string;
+        for (int i = 0; i < dir_lvl; i++) {
+            *ptr++ = (next_sibling(ctx->nodes, index) == dir_stack[i]) ? ' ' : dir_skip;
+        }
+        *ptr++ = (next_sibling(ctx->nodes, index) == dir_stack[dir_lvl]) ? dir_last_child : dir_child;
+        *ptr++ = has_child(ctx->nodes, index) ? dir_start : child;
+        ptr += sprintf(ptr, node->type == 0x00 ? "%s " : "%s/ ", name);
+        if (node->type == 0x00) {
+            sprintf(ptr, "(%#x)", node->size);
+        }
+        else {
+            dir_stack[++dir_lvl] = node->size;
+        }
+
+        puts(string);
+        usleep(80000);
+
+        while (index + 1 == dir_stack[dir_lvl] && dir_lvl > 0) dir_lvl--;
+    }
 }
 
 static unsigned int U8FindChild(U8Context* ctx, unsigned int parent, const char* name) {
@@ -90,10 +133,7 @@ static unsigned int U8FindChild(U8Context* ctx, unsigned int parent, const char*
             return dir_cur;
 
         // Next child node
-        if (node->type == 0x01)
-            dir_cur = node->size;
-        else
-            dir_cur++;
+        dir_cur = next_sibling(ctx->nodes, dir_cur);
     }
 
     return 0;
@@ -133,10 +173,11 @@ int U8OpenFile(U8Context* ctx, const char* filepath, U8File* out) {
         return -3;
 
     if (out) {
-        out->ctx = ctx;
-        out->node_index = index;
-        out->data_ptr = ctx->ptr + node->offset;
-        out->fsize = node->size;
+        out->ctx    = ctx;
+        out->index  = index;
+        out->offset = node->offset;
+        out->ptr    = ctx->ptr + node->offset;
+        out->size   = node->size;
     }
 
     return 0;

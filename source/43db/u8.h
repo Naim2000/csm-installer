@@ -28,10 +28,12 @@ typedef struct U8Context {
 
 typedef struct U8File {
     U8Context* ctx;
-    unsigned int node_index;
-    void* data_ptr;
-    size_t fsize;
+    unsigned int index;
+    unsigned int offset;
+    void* ptr;
+    size_t size;
 } U8File;
 
-int U8Init(void* ptr, size_t fsize, U8Context* ctx);
+int U8Init(void* ptr, U8Context* ctx);
+void U8Examine(U8Context*);
 int U8OpenFile(U8Context* ctx, const char* filepath, U8File* out);
