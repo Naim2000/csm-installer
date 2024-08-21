@@ -60,21 +60,21 @@ bool FATMount() {
 
 	// FATUnmount();
 	for (FATDevice* dev = devices; dev < devices + NUM_DEVICES; dev++) {
-		dev->disk->startup();
-		if (dev->disk->isInserted() && FATMountDevice(dev)) {
+		if (dev->mounted ||
+			(dev->disk->startup() && dev->disk->isInserted() && FATMountDevice(dev))) {
 		//	printf("[+]	Device detected:	\"%s\"\n", dev->friendlyName);
 			attached[i++] = dev;
 		}
 	}
 
 	if (i == 0) {
-	//	puts("\x1b[30;1m[?]	No storage devices are attached.\x1b[39m");
+		puts("\x1b[30;1m[?]	No storage devices are attached.\x1b[39m");
 		return false;
 	}
 
 	FATDevice* target = NULL;
-	if (i == 1) target = attached[0];
-	else {
+	// if (i == 1) target = attached[0]; else
+	{
 		puts("[*]	Choose a device to use.");
 
 		int index = 0;

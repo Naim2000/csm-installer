@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <gccore.h>
 #include <ogc/es.h>
+#include <ogc/cache.h>
 #include <wiiuse/wpad.h>
 #include <libpatcher.h>
 
@@ -103,6 +104,38 @@ int options(void)
 	return 0;
 }
 
+void deinitialize(void)
+{
+	ISFS_Deinitialize();
+	FATUnmount();
+	network_deinit();
+}
+
+int HBC(void)
+{
+	deinitialize();
+	exit(0);
+}
+
+int WiiMenu(void)
+{
+	deinitialize();
+
+	if (sysmenu->hasPriiloader) {
+		// Magic word 'Pune': force boot System Menu
+		uint32_t* const priiloaderMagicWord = (uint32_t*)0x817FEFF0; // I like this one more because it's actually aligned on a 4 byte boundary
+		*priiloaderMagicWord = 0x50756E65;
+		DCFlushRange(priiloaderMagicWord, sizeof(uint32_t));
+	}
+
+	int ret = WII_LaunchTitle(0x100000002LL);
+	__builtin_unreachable();
+
+	printf("WII_LaunchTitle returned %i\n", ret);
+	usleep(3000000);
+	exit(ret);
+}
+
 static MainMenuItem items[] = {
 	{
 		.name = "Install a theme",
@@ -110,12 +143,6 @@ static MainMenuItem items[] = {
 		.pause = true
 	},
 
-	{
-		.name = "Apply 43DB fix to current theme (vWii)",
-		.action = PatchThemeInPlace,
-		.heading = true,
-		.pause = true
-	},
 
 	{
 		.name = "Save current theme",
@@ -131,15 +158,36 @@ static MainMenuItem items[] = {
 		.pause = true
 	},
 
+
+	{
+		.name = "Apply 43DB fix to current theme (vWii)",
+		.action = PatchThemeInPlace,
+		.heading = true,
+		.pause = true
+	},
+
+	{
+		.name = "Switch device"
+	},
+
 	{
 		.name = "Options",
 		.action = options
 	},
 
 	{
-		.name = "Exit"
-	}
+		.name = "Return to Homebrew Channel",
+		.action = HBC
+	},
+
+	{
+		.name = "Return to Wii Menu",
+		.action = WiiMenu,
+		.pause = true
+	},
 };
+// I've forgotten to update the number in every instance I've had to, so it's time to do this
+#define NBR_ITEMS (sizeof(items) / sizeof(MainMenuItem))
 
 int main() {
 	__exception_setreload(10);
@@ -164,14 +212,9 @@ int main() {
 	if (sysmenu_process() < 0)
 		goto waitexit;
 
-	if (!FATMount()) {
-		puts("Unable to mount a storage device...");
-		goto waitexit;
-	}
-
 	if (!sysmenu->hasPriiloader) {
 		printf("\x1b[30;1mPlease install Priiloader..!\x1b[39m\n\n");
-		sleep(1);
+		sleep(2);
 
 		if (sysmenu->platform == Mini) // There's nooooooooo way you're doing this on Mini with no Priiloader. Illegal
 			goto waitexit;
@@ -180,13 +223,20 @@ int main() {
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	MainMenu(items, 6);
+	while (true) {
+		clear();
+
+		if (!FATMount()) {
+			// puts("Unable to mount a storage device...");
+			goto waitexit;
+		}
+
+		MainMenu(items, NBR_ITEMS);
+	}
+
 
 exit:
-	ISFS_Deinitialize();
-	FATUnmount();
-	network_deinit();
-	WPAD_Shutdown();
+	deinitialize();
 	return 0;
 
 waitexit:

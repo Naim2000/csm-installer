@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <ogc/consol.h>
 
 #include "menu.h"
@@ -15,6 +16,9 @@ void DrawHeading(void)
 	puts("Super basic menu (2)");
 	for (int i = 0; i < conX; i++) putchar(0xc4);
 }
+
+__attribute__((weak))
+void deinitialize(void) { }
 
 void MainMenu(int argc; MainMenuItem argv[argc], int argc)
 {
@@ -67,11 +71,16 @@ void MainMenu(int argc; MainMenuItem argv[argc], int argc)
 				DrawHeading();
 				break;
 			}
-
-		//	case WPAD_BUTTON_B:
-			case WPAD_BUTTON_HOME:
+/*
+			case WPAD_BUTTON_B:
 			{
 				return;
+			}
+*/
+			case WPAD_BUTTON_HOME:
+			{
+				deinitialize();
+				exit(0);
 			}
 		}
 	}
