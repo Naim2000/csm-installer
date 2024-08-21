@@ -22,12 +22,36 @@
 #include "43db/ardb.h"
 
 static const char
-	wiithemer_sig[] = "wiithemer",
-	binary_path_search[] = "C:\\Revolution\\ipl\\System",
-	binary_path_search_2[] = "D:\\Compat_irdrepo\\ipl\\Compat",
-	binary_path_search_3[] = "c:\\home\\neceCheck\\WiiMenu\\ipl\\bin\\RVL\\Final_", // What
+	binary_path_search[] = "\\System",
+	binary_path_search_2[] = "\\Compat_irdrepo\\ipl\\Compat",
+	binary_path_search_3[] = "\\home\\neceCheck\\WiiMenu\\ipl\\bin\\RVL\\Final_", // What
 	binary_path_fmt12[] = "%c_%c\\ipl\\bin\\RVL\\Final_%c";
 
+static const char* getiplSettingPath(char region) {
+	switch (region) {
+		case 'U': return "/html/US2/iplsetting.ash";
+		case 'E': return "/html/EU2/iplsetting.ash";
+		case 'J': return "/html/JP2/iplsetting.ash";
+		case 'K': return "/html/KR2/iplsetting.ash";
+	}
+
+	return "/html/??\?/iplsetting.ash";
+}
+
+// < Bruh moment. >
+static const char* getmainSelPath(char region) {
+	switch (region) {
+		case 'U': return "/FINAL/US2/main.sel";
+		case 'E': return "/FINAL/EU2/main.sel";
+		case 'J': return "/FINAL/JP2/main.sel";
+		case 'K': return "/FINAL/KR2/main.sel";
+	}
+
+	return "/FINAL/??\?/main.sel";
+}
+
+
+/*
 // Todo: overhaul this function
 SignatureLevel SignedTheme(const void* buffer, size_t length) {
 	sha1 hash = {};
@@ -41,34 +65,50 @@ SignatureLevel SignedTheme(const void* buffer, size_t length) {
 	else
 		return unknown;
 }
+*/
 
-version_t GetThemeVersion(const void* buffer, size_t length) {
-	ThemeBase base;
-	char rgn = 0, major = 0, minor = 0;
-	char* ptr;
+// This whole signature thing is kinda weird!!!
+static ThemeSignature FindSignature(void* sel_header) {
+	if (!strcasecmp((const char*)sel_header + 0x100, "Wii_Themer"))
+		return WiiThemer_v2;
 
+	else if (!strcmp((const char*)sel_header + 0xF0, "ModMii_________\xa9______XFlak"))
+		return ModMii;
 
-	if ((ptr = memmem(buffer, length, binary_path_search, strlen(binary_path_search)))) {
-		base = Wii;
+	else if (strstr((const char*)sel_header + 0xF0, "wiithemer")) // Forgot how this one looks
+		return WiiThemer_v1;
+
+	return unknown;
+}
+
+static void ExtractElfPath(const char* path, version_t* out) {
+	const char* ptr;
+
+	if ((ptr = strstr(path, binary_path_search))) {
+		out->base = Wii;
 		ptr += strlen(binary_path_search);
 	}
 
-	else if ((ptr = memmem(buffer, length, binary_path_search_2, strlen(binary_path_search_2)))) {
-		base = vWii;
+	else if ((ptr = strstr(path, binary_path_search_2))) {
+		out->base = vWii;
 		ptr += strlen(binary_path_search_2);
 	}
 
-	else if ((ptr = memmem(buffer, length, binary_path_search_3, strlen(binary_path_search_3)))) { // Wii mini bruh
+	else if ((ptr = strstr(path, binary_path_search_3))) { // Wii mini bruh
 		ptr += strlen(binary_path_search_3);
-		rgn = *ptr;
-		return (version_t) { Mini, '4', '3', rgn };
+		out->base   = Mini;
+		out->major  = '4';
+		out->minor  = '3';
+		out->region = *ptr;
+		return;
 	}
 
-	if (!ptr)
-		return (version_t) { '?', '?', '?', '?' };
+	if (!ptr) {
+		out->base = out->major = out->minor = out->region = '?';
+		return;
+	}
 
-	sscanf(ptr, binary_path_fmt12, &major, &minor, &rgn);
-	return (version_t) { base, major, minor, rgn };
+	sscanf(ptr, binary_path_fmt12, &out->major, &out->minor, &out->region);
 }
 
 static uint32_t filter_ardb(AspectRatioDatabase* ardb, bool (*filter)(uint32_t))
@@ -103,7 +143,7 @@ static bool ardb_filter_wc24(uint32_t entry) {
 static int WriteThemeFile(void* buffer, size_t fsize) {
 	char filepath[ISFS_MAXPATH] = {};
 	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
-	printf("%s\n", filepath);
+	puts(filepath);
 	int ret = NAND_Write(filepath, buffer, fsize, progressbar);
 	if (ret < 0)
 		printf("error! (%d)\n", ret);
@@ -119,23 +159,24 @@ static int PatchTheme43DB(U8Context* ctx) {
 	puts("Patching WiiWare 4:3 database...");
 
 	ret = U8OpenFile(ctx, "/titlelist/wwdb.bin", &wwdb);
-	if (ret != 0)
+	if (ret < 0)
 	{
 		printf("Failed to open /titlelist/wwdb.bin in archive? (%i)\n", ret);
 		return 0;
 	}
 
-	ardb = (AspectRatioDatabase*)wwdb.data_ptr;
+	ardb = (AspectRatioDatabase*)(ctx->ptr + wwdb.offset);
 	uint32_t filtered = filter_ardb(ardb, ardb_filter_wc24);
 
 	if (filtered)
-		ctx->nodes[wwdb.node_index].size -= (filtered * sizeof(uint32_t));
+		ctx->nodes[wwdb.index].size -= (filtered * sizeof(uint32_t));
 
 	return filtered;
 }
 
 int InstallTheme(void* buffer, size_t size, int dbpatching) {
 	U8Context ctx = {};
+	int ret;
 
 	if (memcmp(buffer, "PK", 2) == 0) {
 		puts("\x1b[31;1mPlease do not rename .mym files.\x1b[39m\n"
@@ -143,40 +184,78 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 		);
 		return -EINVAL;
 	}
-	else if (U8Init(buffer, size, &ctx) != 0) {
+	else if (U8Init(buffer, &ctx) != 0) {
 		puts("U8Init() failed, is this really a theme?");
 		return -EINVAL;
 	}
 
-	version_t themeversion = GetThemeVersion(buffer, size);
-	if (themeversion.region != sysmenu->region || themeversion.major != sysmenu->versionMajor || themeversion.base != sysmenu->platform) {
-		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\n"
-			   "Theme version : %c %c.X%c\n"
-			   "System version: %c %c.X%c\n", themeversion.base, themeversion.major,   themeversion.region,
-											  sysmenu->platform, sysmenu->versionMajor, sysmenu->region);
+	const char* const testPaths[] = { "/www.arc", "/font/font.ash", "/layout/common/health.ash", "/sound/IplSound.brsar", NULL };
+
+	for (int i = 0; testPaths[i]; i++) {
+		ret = U8OpenFile(&ctx, testPaths[i], NULL);
+		if (ret < 0) {
+			printf("Failed to open '%s' (%i)\n", testPaths[i], ret);
+			puts  ("Is this even a theme? Or just a U8 archive?");
+			return -EINVAL;
+		}
+	}
+
+	ret = U8OpenFile(&ctx, getiplSettingPath(sysmenu->region), NULL);
+	if (ret < 0) {
+		printf("Failed to open %s (%i)\n", getiplSettingPath(sysmenu->region), ret);
+		puts("Is this theme really for this region?");
 		return -EINVAL;
 	}
 
-	switch (SignedTheme(buffer, size)) {
-		case default_theme:
-			puts("\x1b[32;1mThis is the default theme for your Wii menu.\x1b[39m");
-			break;
-		case wiithemer_signed:
-			puts("\x1b[36;1mThis theme was signed by wii-themer.\x1b[39m");
-			break;
+	U8File main_sel;
+	ret = U8OpenFile(&ctx, getmainSelPath(sysmenu->region), &main_sel);
+	if (ret < 0) {
+		printf("Failed to open %s (%i)\n", getiplSettingPath(sysmenu->region), ret);
+		return -EINVAL;
+	}
 
-		default:
-			puts("\x1b[30;1mThis theme isn't signed...\x1b[39m");
-			if (!sysmenu->hasPriiloader) {
-				puts("Consider installing Priiloader before installing unsigned themes.");
-				return -EPERM;
-			}
-			break;
+	uint32_t* sel_header = (uint32_t*)main_sel.ptr;
+	const char* elf_path = (const char*)main_sel.ptr + sel_header[4]; // path_offset
+	// uint32_t path_len = sel_header[5];
+
+	version_t themeversion;
+	ExtractElfPath(elf_path, &themeversion);
+	if (themeversion.region != sysmenu->region || themeversion.major != sysmenu->versionMajor || themeversion.base != sysmenu->platform) {
+		printf("\x1b[41;30mIncompatible theme!\x1b[40;39m\n"
+			   "Theme version : %c %c.%c%c\n"
+			   "System version: %c %c.X%c\n", themeversion.base, themeversion.major,   themeversion.minor, themeversion.region,
+											  sysmenu->platform, sysmenu->versionMajor,                    sysmenu->region);
+		return -EINVAL;
+	}
+
+	if (CheckHash(buffer, size, sysmenu->archive.hash)) {
+		puts("\x1b[32;1mThis is the default theme for your Wii menu.\x1b[39m");
+	}
+	else {
+		switch (FindSignature(sel_header)) {
+			case WiiThemer_v1:
+			case WiiThemer_v2:
+				puts("\x1b[36;1mThis theme was signed by wii-themer.\x1b[39m");
+				break;
+
+			case ModMii:
+				puts("\x1b[36;1mThis theme was signed by ModMii.\x1b[39m");
+				break;
+
+			default:
+				puts("\x1b[30;1mThis theme isn't signed...\x1b[39m");
+				if (!sysmenu->hasPriiloader) {
+					puts("Consider installing Priiloader before installing unsigned themes.");
+					return -EPERM;
+				}
+				break;
+		}
 	}
 
 	if (themeversion.base == vWii && dbpatching)
 		PatchTheme43DB(&ctx);
 
+	// U8Examine(&ctx);
 	return WriteThemeFile(buffer, size);
 }
 
@@ -200,16 +279,18 @@ int DownloadOriginalTheme() {
 	ret = NAND_Read(filepath, buffer, fsize, NULL);
 
 	sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
-	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) goto save;
+	if (ret >= 0 && CheckHash(buffer, fsize, sysmenu->archive.hash))
+		goto save;
 
 	ret = FAT_Read(filepath, buffer, fsize, NULL);
-	if (ret >= 0 && (SignedTheme(buffer, fsize) == default_theme)) {
+	if (ret >= 0 && CheckHash(buffer, fsize, sysmenu->archive.hash)) {
 		printf("Already saved. Look for '%s'\n", filepath);
 		goto finish;
 	}
 
 	puts("Initializing network... ");
 	ret = network_init();
+	// network_getlasterror();
 	if (ret < 0) {
 		printf("Failed to intiailize network! (%d)\n", ret);
 		goto finish;
@@ -253,11 +334,10 @@ finish:
 
 int SaveCurrentTheme(void) {
 	int ret;
-	char filepath[256];
+	char filepath[ISFS_MAXPATH];
 	size_t fsize;
-	sha1 hash = {};
 
-	snprintf(filepath, ISFS_MAXPATH, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
 
 	ret = NAND_GetFileSize(filepath, &fsize);
 	if (ret < 0) {
@@ -278,25 +358,28 @@ int SaveCurrentTheme(void) {
 		goto finish;
 	}
 
-	sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
+	char* ptr = filepath + sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
 
-	mbedtls_sha1_ret(buffer, fsize, hash);
-	if (!memcmp(hash, sysmenu->archive.hash, sizeof(sha1)))
-		strcat(filepath, ".app");
-	else
-		sprintf(strchr(filepath, 0), "_%016llx.csm", *(uint64_t*)hash);
-
-	size_t _fsize = 0;
-	printf("'%s'\n", filepath);
-	if (!FAT_GetFileSize(filepath, &fsize) && _fsize == fsize) {
-		puts("File already exists.");
-	} else {
-		ret = FAT_Write(filepath, buffer, fsize, progressbar);
-		if (ret < 0)
-			perror("Failed to save");
+	if (CheckHash(buffer, fsize, sysmenu->archive.hash)) {
+		strcpy(ptr, ".app");
+		if (!FAT_GetFileSize(filepath, NULL)) {
+			puts(filepath);
+			puts("File already exists.");
+			goto finish;
+		}
+	}
+	else {
+		for (unsigned i = 0; i < 9999; i++) {
+			sprintf(ptr, "_%04u.csm", i);
+			if (FAT_GetFileSize(filepath, NULL) < 0)
+				break;
+		}
 	}
 
-
+	printf("'%s'\n", filepath);
+	ret = FAT_Write(filepath, buffer, fsize, progressbar);
+	if (ret < 0)
+		perror("Failed to save");
 
 finish:
 	free(buffer);
@@ -305,9 +388,8 @@ finish:
 
 int PatchThemeInPlace(void) {
 	int ret;
-	char filepath[256];
+	char filepath[ISFS_MAXPATH];
 	size_t fsize;
-	sha1 hash = {};
 	U8Context ctx = {};
 
 	if (sysmenu->platform != vWii) {
@@ -315,7 +397,9 @@ int PatchThemeInPlace(void) {
 		return 0;
 	}
 
-	snprintf(filepath, ISFS_MAXPATH, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
+
+	puts("Loading theme...");
 
 	ret = NAND_GetFileSize(filepath, &fsize);
 	if (ret < 0) {
@@ -335,10 +419,7 @@ int PatchThemeInPlace(void) {
 		goto finish;
 	}
 
-	// Get the hash from now
-	mbedtls_sha1_ret(buffer, fsize, hash);
-
-	ret = U8Init(buffer, fsize, &ctx);
+	ret = U8Init(buffer, &ctx);
 	if (ret != 0) {
 		printf("U8Init() failed? What? (%i)\n", ret);
 		goto finish;
@@ -349,6 +430,53 @@ int PatchThemeInPlace(void) {
 		goto finish;
 	}
 
+	puts("Saving changes...");
+
+	// ret = WriteThemeFile(buffer, fsize); // Waste of time
+	/* This feels a bit sketchy tho! */
+	int fd = ret = ISFS_Open(filepath, ISFS_OPEN_RW); // Don't truncate pls
+	if (ret < 0) { // Not supposed to happen
+		printf("ISFS_Open failed? (%i)\n", ret);
+		goto finish;
+	}
+
+	do {
+		// I'm a little afraid of alignment issues right now.
+		ret = ISFS_Write(fd, buffer, ctx.header.data_offset);
+		if (ret != ctx.header.data_offset) {
+			printf("ISFS_Write failed? (%i)\n", ret);
+			break;
+		}
+
+		U8File wwdb;
+		U8OpenFile(&ctx, "/titlelist/wwdb.bin", &wwdb);
+
+		// No guarantees!
+		off_t  write_ofs = __builtin_align_down(wwdb.offset, 0x20);
+		void  *write_ptr = ctx.ptr + write_ofs;
+		size_t write_len = wwdb.size + (wwdb.offset & 0x1F);
+
+		ret = ISFS_Seek(fd, write_ofs, SEEK_SET);
+		if (ret < 0) {
+			printf("ISFS_Seek failed? (%i)\n", ret);
+			break;
+		}
+
+		ret = ISFS_Write(fd, write_ptr, write_len);
+		if (ret != write_len) {
+			printf("ISFS_Write failed? (%i)\n", ret);
+			break;
+		}
+
+		ret = 0;
+	} while (0);
+	ISFS_Close(fd);
+
+	if (!ret)
+		puts("OK!");
+
+
+/*
 	sprintf(filepath, "%s:/themes/%08x-v%hu", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
 
 	if (memcmp(hash, sysmenu->archive.hash, sizeof(sha1)) != 0)
@@ -364,7 +492,7 @@ int PatchThemeInPlace(void) {
 		if (ret < 0)
 			perror("Failed to save");
 	}
-
+*/
 finish:
 	free(buffer);
 	return ret;

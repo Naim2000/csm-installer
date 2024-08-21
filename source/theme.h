@@ -15,12 +15,13 @@ typedef struct version_s {
 } version_t;
 
 typedef enum {
-	unknown,
-	wiithemer_signed,
-	default_theme,
-} SignatureLevel;
+	unknown = 0,
+	WiiThemer_v1,
+	WiiThemer_v2,
+	ModMii,
+} ThemeSignature;
 
-SignatureLevel SignedTheme(const void* buffer, size_t length);
+// SignatureLevel SignedTheme(const void* buffer, size_t length);
 int InstallTheme(void* buffer, size_t length, int dbpatching);
 int DownloadOriginalTheme(void);
 int PatchThemeInPlace(void);
