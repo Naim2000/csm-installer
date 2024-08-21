@@ -115,7 +115,11 @@ int NAND_Write(const char* filepath, const void* buffer, size_t filesize, RWCall
 	char tmpfilepath[32];
 	sprintf(tmpfilepath, "/tmp%s", strrchr(filepath, '/'));
 
-	int ret = ISFS_Open(tmpfilepath, ISFS_OPEN_WRITE);
+	int ret = ISFS_CreateFile(tmpfilepath, 0, 3, 0, 0);
+	if (ret < 0)
+		return ret;
+
+	ret = ISFS_Open(tmpfilepath, ISFS_OPEN_WRITE);
 	if (ret < 0)
 		return ret;
 
