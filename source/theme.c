@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -261,7 +262,6 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 
 int DownloadOriginalTheme(bool silent) {
 	int ret;
-	bool installedIsOriginal = false;
 	char filepath[ISFS_MAXPATH];
 	void* buffer;
 	size_t fsize = sysmenu->archive.size;
@@ -276,22 +276,20 @@ int DownloadOriginalTheme(bool silent) {
 		return -ENOMEM;
 	}
 
-	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
-	ret = NAND_Read(filepath, buffer, fsize, NULL);
-
 	sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
-	if (ret >= 0 && CheckHash(buffer, fsize, sysmenu->archive.hash))
-		installedIsOriginal = true;
-
 	ret = FAT_Read(filepath, buffer, fsize, NULL);
 	if (ret >= 0 && CheckHash(buffer, fsize, sysmenu->archive.hash)) {
 		if (!silent) printf("Already saved. Look for '%s'\n", filepath);
 		goto finish;
 	}
 
-	if (installedIsOriginal)
+	sprintf(filepath, "/title/00000001/00000002/content/%08x.app", sysmenu->archive.cid);
+	ret = NAND_Read(filepath, buffer, fsize, NULL);
+
+	if (ret >= 0 && CheckHash(buffer, fsize, sysmenu->archive.hash))
 		goto save;
-	else if (silent)
+
+	if (silent)
 		goto finish;
 
 	puts("Initializing network... ");
@@ -325,7 +323,10 @@ int DownloadOriginalTheme(bool silent) {
 	}
 
 save:
-	puts("Saving...");
+	sprintf(filepath, "%s:/themes/%08x-v%hu.app", GetActiveDeviceName(), sysmenu->archive.cid, sysmenu->tmd.title_version);
+
+	puts(silent ? "Saving original theme backup..." : "Saving...");
+
 	ret = FAT_Write(filepath, buffer, fsize, progressbar);
 	if (ret < 0)
 		perror("Failed to save original theme");
@@ -361,7 +362,7 @@ int SaveCurrentTheme(void) {
 	puts(filepath);
 	ret = NAND_Read(filepath, buffer, fsize, progressbar);
 	if (ret < 0) {
-		printf("error! (%i)\n", ret);
+		printf("NAND_Read failed? (%i)\n", ret);
 		goto finish;
 	}
 
@@ -383,7 +384,7 @@ int SaveCurrentTheme(void) {
 		}
 	}
 
-	printf("'%s'\n", filepath);
+	printf("Saving to %s\n", filepath);
 	ret = FAT_Write(filepath, buffer, fsize, progressbar);
 	if (ret < 0)
 		perror("Failed to save");
