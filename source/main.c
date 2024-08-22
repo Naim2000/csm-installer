@@ -206,6 +206,9 @@ static MainMenuItem items[] = {
 int main() {
 	__exception_setreload(10);
 
+	DrawHeading();
+	DrawFooter(false);
+
 	puts("Loading...");
 
 	if (!patch_ahbprot_reset() || !patch_isfs_permissions()) {

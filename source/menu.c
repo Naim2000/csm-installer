@@ -59,7 +59,7 @@ void DrawFooter(int controls)
 		printf("%.*s", conX, line);
 	}
 
-	printf("\x1b[%i;%iH", curX, curY);
+	printf("\x1b[%i;%iH", curY, curX);
 }
 
 __attribute__((weak))

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <ogc/video.h>
 
 #include "u8.h"
 
@@ -110,7 +111,8 @@ void U8Examine(U8Context* ctx) {
         }
 
         puts(string);
-        usleep(80000);
+        VIDEO_WaitVSync();
+        VIDEO_WaitVSync();
 
         while (index + 1 == dir_stack[dir_lvl] && dir_lvl > 0) dir_lvl--;
     }

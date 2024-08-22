@@ -16,5 +16,6 @@ typedef const struct
 } SettingsItem;
 
 void DrawHeading(void);
+void DrawFooter(int controls);
 void MainMenu(int argc; MainMenuItem argv[argc], int argc);
 void SettingsMenu(int argc; SettingsItem argv[argc], int argc);
