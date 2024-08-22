@@ -10,17 +10,20 @@
 void DrawHeading(void)
 {
 	int conX, conY;
-	CON_GetMetrics(&conX, &conY);
-	// int width = conX - 3;
+	char line[120];
+	memset(line, 0xc4, sizeof(line));
 
+	CON_GetMetrics(&conX, &conY);
 	// Draw a nice heading.
 	clear();
 	puts("csm-installer v1.4 by thepikachugamer");
 	puts("Super basic menu (2)");
-	for (int i = 0; i < conX; i++) putchar(0xc4);
+	printf("%.*s", conX, line);
+	// putchar('\n');
 
 /*
 	// Draw a nicer heading. // Nvm this looks worse
+	int width = conX - 3;
 	char horizontal[120];
 	memset(horizontal, 0xcd, sizeof(horizontal));
 
@@ -28,6 +31,35 @@ void DrawHeading(void)
 	printf(" \xcc%.*scsm-installer v1.4 - by thepikachugamer%.*s\xb9", (width - 39) / 2, horizontal, (width - 39) / 2, horizontal); // 39
 	printf(" \xc8%.*s\xbc", width, horizontal);
 */
+}
+
+void DrawFooter(int controls)
+{
+	int conX, conY, curX, curY;
+	char line[120];
+	memset(line, 0xc4, sizeof(line));
+
+	CON_GetMetrics(&conX, &conY);
+	CON_GetPosition(&curX, &curY);
+
+	printf("\x1b[%i;0H", conY - 3);
+	if (controls) {
+		printf("%.2sControls:%.*s", line, conX - 11, line);
+		switch (controls) {
+			case 1:
+				printf("	(A) : Select                               \x12 Up/Down : Move cursor\n");
+				printf("	[B] : Nothing                             Home/Start : Return to HBC");
+				break;
+			case 2:
+				printf("	\x1d Left/Right : Change setting              \x12 Up/Down : Move cursor\n");
+				printf("	         [B] : Main menu                  Home/Start : Main menu");
+		}
+	}
+	else {
+		printf("%.*s", conX, line);
+	}
+
+	printf("\x1b[%i;%iH", curX, curY);
 }
 
 __attribute__((weak))
@@ -39,6 +71,7 @@ void MainMenu(int argc; MainMenuItem argv[argc], int argc)
 
 	DrawHeading();
 	CON_GetPosition(&conX, &conY);
+	DrawFooter(1);
 
 	while (true)
 	{
@@ -71,7 +104,7 @@ void MainMenu(int argc; MainMenuItem argv[argc], int argc)
 				if (!item->action) return;
 
 				clear();
-				if (item->heading) DrawHeading();
+				if (item->heading) { DrawHeading(); DrawFooter(false); }
 				item->action();
 
 				if (item->pause) {
@@ -81,6 +114,7 @@ void MainMenu(int argc; MainMenuItem argv[argc], int argc)
 
 				clear();
 				DrawHeading();
+				DrawFooter(1);
 				break;
 			}
 /*
@@ -105,6 +139,7 @@ void SettingsMenu(int argc; SettingsItem argv[argc], int argc)
 
 	DrawHeading();
 	CON_GetPosition(&conX, &conY);
+	DrawFooter(2);
 
 	while (true)
 	{

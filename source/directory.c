@@ -154,11 +154,11 @@ a:
 
 		printf(
 			"%.2sControls:%.*s\n"
-			"	(A) : %-35s Up\x1e/Down\x1f : Select\n"
-			"	[B] : %-35s Home/Start: Cancel",
+			"	(A) : %-35s  \x12 Up/Down : Move cursor\n"
+			"	[B] : %-35s Home/Start : Main menu",
 			line, conX - 12, line,
-			(!cnt) ? "Go back" : ((entry->isdir) ? "Enter" : "Install"),
-			(strchr(workpath, '/') == strrchr(workpath, '/')) ? "Cancel" : "Go back"
+			(!cnt) ? "Exit directory" : ((entry->isdir) ? "Enter directory" : "Install theme file"),
+			(strchr(workpath, '/') == strrchr(workpath, '/')) ? "Main menu" : "Exit directory"
 		);
 
 		u32 buttons = wait_button(0);

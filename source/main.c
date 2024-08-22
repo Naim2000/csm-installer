@@ -40,17 +40,13 @@ int SelectTheme() {
 	clear();
 
 	if (ret) {
-	//	extern char cwd[];
-
-	//	printf("GetActiveDeviceName() => %p \"%s\"\n", GetActiveDeviceName(), GetActiveDeviceName());
-	//	printf("cwd => %p \"%s\"\n", cwd, cwd);
 		perror("SelectFileMenu failed");
 		return ret;
 	}
 
 	DrawHeading();
 
-	printf("\n%s\n\n", file);
+	printf("%s\n\n", file);
 
 	if (FAT_GetFileSize(file, &fsize) < 0) {
 		perror("FAT_GetFileSize failed");
