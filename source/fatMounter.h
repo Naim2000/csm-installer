@@ -2,4 +2,5 @@
 
 bool FATMount();
 void FATUnmount();
+void FATSelectDefault();
 const char* GetActiveDeviceName();

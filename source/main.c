@@ -48,6 +48,8 @@ int SelectTheme() {
 		return ret;
 	}
 
+	DrawHeading();
+
 	printf("\n%s\n\n", file);
 
 	if (FAT_GetFileSize(file, &fsize) < 0) {
@@ -108,6 +110,17 @@ int options(void)
 	return 0;
 }
 
+int ReloadDevices(void)
+{
+	FATUnmount();
+	if (FATMount())
+		FATSelectDefault();
+	else
+		wait_button(0);
+
+	return 0;
+}
+
 void deinitialize(void)
 {
 	ISFS_Deinitialize();
@@ -142,21 +155,21 @@ int WiiMenu(void)
 
 static MainMenuItem items[] = {
 	{
-		.name = "Install a theme",
+		.name = "Install a theme\n",
 		.action = SelectTheme,
 		.pause = true
 	},
 
 
 	{
-		.name = "Save current theme",
+		.name = "Save a backup of the current theme",
 		.action = SaveCurrentTheme,
 		.heading = true,
 		.pause = true,
 	},
 
 	{
-		.name = "Download base theme",
+		.name = "Download original Wii theme (Base theme)",
 		.action = DownloadOriginal,
 		.heading = true,
 		.pause = true
@@ -170,21 +183,23 @@ static MainMenuItem items[] = {
 	},
 
 	{
-		.name = "Switch device"
+		.name = "Reload devices",
+		.action = ReloadDevices,
+		.heading = true
 	},
 
 	{
-		.name = "Options",
+		.name = "Settings\n",
 		.action = options
 	},
 
 	{
-		.name = "Return to Homebrew Channel",
+		.name = "Return to the Homebrew Channel",
 		.action = HBC
 	},
 
 	{
-		.name = "Return to Wii Menu",
+		.name = "Return to Wii System Menu",
 		.action = WiiMenu,
 		.pause = true
 	},
@@ -233,14 +248,7 @@ int main() {
 		wait_button(WPAD_BUTTON_A);
 	}
 
-	while (true) {
-		MainMenu(items, NBR_ITEMS);
-
-		clear();
-		if (!FATMount())
-			goto waitexit;
-	}
-
+	MainMenu(items, NBR_ITEMS);
 
 exit:
 	deinitialize();

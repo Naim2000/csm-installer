@@ -50,7 +50,6 @@ static bool FATMountDevice(FATDevice* dev) {
 	else
 		puts("Failed!");
 
-
 	return dev->mounted;
 }
 
@@ -58,11 +57,8 @@ bool FATMount() {
 	FATDevice* attached[NUM_DEVICES] = {};
 	int i = 0;
 
-	// FATUnmount();
 	for (FATDevice* dev = devices; dev < devices + NUM_DEVICES; dev++) {
-		if (dev->mounted ||
-			(dev->disk->startup() && dev->disk->isInserted() && FATMountDevice(dev))) {
-		//	printf("[+]	Device detected:	\"%s\"\n", dev->friendlyName);
+		if (dev->mounted || (dev->disk->startup() && dev->disk->isInserted() && FATMountDevice(dev))) {
 			attached[i++] = dev;
 		}
 	}
@@ -72,44 +68,56 @@ bool FATMount() {
 		return false;
 	}
 
+	if (!active)
+		FATSetDefault(attached[0]);
+
+	return true;
+}
+
+void FATSelectDefault() {
+	FATDevice* attached[NUM_DEVICES];
+	int i = 0;
+
+	for (FATDevice* dev = devices; dev < devices + NUM_DEVICES; dev++)
+		if (dev->mounted)
+			attached[i++] = dev;
+
+	if (!i)
+		return;
+
+	puts("[*]	Choose a device to use.");
+
+	int index = 0;
 	FATDevice* target = NULL;
-	// if (i == 1) target = attached[0]; else
-	{
-		puts("[*]	Choose a device to use.");
-
-		int index = 0;
-		bool selected = false;
-		while (!selected) {
-			clearln();
-			printf("[*]	Device: < %s >", attached[index]->friendlyName);
-
-			switch (wait_button(0))
-			{
-				case WPAD_BUTTON_LEFT:
-					if (index) index -= 1;
-					break;
-
-				case WPAD_BUTTON_RIGHT:
-					if (++index == i) index = 0;
-					break;
-
-				case WPAD_BUTTON_A:
-					target = attached[index];
-				case WPAD_BUTTON_B:
-				case WPAD_BUTTON_HOME:
-					selected = true;
-					break;
-
-
-			}
-		}
+	bool selected = false;
+	while (!selected) {
 		clearln();
+		printf("[*]	Device: < %s >", attached[index]->friendlyName);
+
+		switch (wait_button(0))
+		{
+			case WPAD_BUTTON_LEFT:
+				if (index) index -= 1;
+				break;
+
+			case WPAD_BUTTON_RIGHT:
+				if (++index == i) index = 0;
+				break;
+
+			case WPAD_BUTTON_A:
+				target = attached[index];
+
+			case WPAD_BUTTON_B:
+			case WPAD_BUTTON_HOME:
+				selected = true;
+				break;
+		}
 	}
 
-	if (!target) return false;
+	if (target)
+		active = target;
 
-	FATSetDefault(target);
-	return true;
+	putchar('\n');
 }
 
 void FATUnmount() {

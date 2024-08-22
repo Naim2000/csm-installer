@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <ogc/consol.h>
 
@@ -10,11 +11,23 @@ void DrawHeading(void)
 {
 	int conX, conY;
 	CON_GetMetrics(&conX, &conY);
+	// int width = conX - 3;
 
 	// Draw a nice heading.
+	clear();
 	puts("csm-installer v1.4 by thepikachugamer");
 	puts("Super basic menu (2)");
 	for (int i = 0; i < conX; i++) putchar(0xc4);
+
+/*
+	// Draw a nicer heading. // Nvm this looks worse
+	char horizontal[120];
+	memset(horizontal, 0xcd, sizeof(horizontal));
+
+	printf(" \xc9%.*s\xbb", width, horizontal);
+	printf(" \xcc%.*scsm-installer v1.4 - by thepikachugamer%.*s\xb9", (width - 39) / 2, horizontal, (width - 39) / 2, horizontal); // 39
+	printf(" \xc8%.*s\xbc", width, horizontal);
+*/
 }
 
 __attribute__((weak))
@@ -24,7 +37,6 @@ void MainMenu(int argc; MainMenuItem argv[argc], int argc)
 {
 	int x = 0, conX, conY;
 
-	clear();
 	DrawHeading();
 	CON_GetPosition(&conX, &conY);
 
@@ -79,8 +91,9 @@ void MainMenu(int argc; MainMenuItem argv[argc], int argc)
 */
 			case WPAD_BUTTON_HOME:
 			{
-				deinitialize();
-				exit(0);
+				// deinitialize();
+				// exit(0);
+				return;
 			}
 		}
 	}
@@ -90,7 +103,6 @@ void SettingsMenu(int argc; SettingsItem argv[argc], int argc)
 {
 	int x = 0, conX, conY;
 
-	clear();
 	DrawHeading();
 	CON_GetPosition(&conX, &conY);
 
