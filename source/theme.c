@@ -51,23 +51,6 @@ static const char* getmainSelPath(char region) {
 	return "/FINAL/??\?/main.sel";
 }
 
-
-/*
-// Todo: overhaul this function
-SignatureLevel SignedTheme(const void* buffer, size_t length) {
-	sha1 hash = {};
-	mbedtls_sha1_ret(buffer, length, hash);
-
-	if (!memcmp(hash, sysmenu->archive.hash, sizeof(sha1)))
-		return default_theme;
-	else if (memmem(buffer, length, wiithemer_sig, strlen(wiithemer_sig)))
-		return wiithemer_signed;
-
-	else
-		return unknown;
-}
-*/
-
 // This whole signature thing is kinda weird!!!
 static ThemeSignature FindSignature(void* sel_header) {
 	if (!strcasecmp((const char*)sel_header + 0x100, "Wii_Themer"))
@@ -179,18 +162,12 @@ int InstallTheme(void* buffer, size_t size, int dbpatching) {
 	U8Context ctx = {};
 	int ret;
 
-	if (memcmp(buffer, "PK", 2) == 0) {
-		puts("\x1b[31;1mPlease do not rename .mym files.\x1b[39m\n"
-			"Follow https://wii.hacks.guide/themes to properly convert it."
-		);
-		return -EINVAL;
-	}
-	else if (U8Init(buffer, &ctx) != 0) {
+	if (U8Init(buffer, &ctx) != 0) {
 		puts("U8Init() failed, is this really a theme?");
 		return -EINVAL;
 	}
 
-	const char* const testPaths[] = { "/www.arc", "/font/font.ash", "/layout/common/health.ash", "/sound/IplSound.brsar", NULL };
+	static const char* const testPaths[] = { "/www.arc", "/layout/common/health.ash", "/sound/IplSound.brsar", NULL };
 
 	for (int i = 0; testPaths[i]; i++) {
 		ret = U8OpenFile(&ctx, testPaths[i], NULL);

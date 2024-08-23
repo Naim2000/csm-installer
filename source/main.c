@@ -178,6 +178,7 @@ static MainMenuItem items[] = {
 		.pause = true
 	},
 
+
 	{
 		.name = "Reload devices",
 		.action = ReloadDevices,
@@ -188,6 +189,7 @@ static MainMenuItem items[] = {
 		.name = "Settings\n",
 		.action = options
 	},
+
 
 	{
 		.name = "Return to the Homebrew Channel",
